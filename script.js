@@ -140,10 +140,10 @@ function computeTotals(){
   let week=0;
   totals.forEach((t,idx)=>{
     week+=t;
-    const out = t ? ('$' + t.toFixed(2)),'') : '';
+    const out = t ? ('$' + t.toFixed(2)) : '';
     el(`tot${dayIds[idx]}`).value = out;
   });
-  el('totWEEK').value = week ? week.toFixed(2).replace(/\.00$/,'') : '';
+  el('totWEEK').value = week ? ('$' + week.toFixed(2)) : '';
 }
 
 function serialize(){
