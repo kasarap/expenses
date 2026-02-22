@@ -1,6 +1,5 @@
 // Weekly Expenses KV-backed app
 const API = {
-  login: '/api/login',
   data: '/api/data',
   weeks: '/api/weeks',
 };
@@ -32,7 +31,6 @@ const rows = [
 ];
 
 // State
-let token = localStorage.getItem('expenses_token') || '';
 let currentWeekEnding = '';
 let autosaveTimer = null;
 
@@ -42,20 +40,16 @@ function setStatus(msg, kind='') {
   s.dataset.kind = kind;
 }
 
-function setLoginStatus(msg) {
-  el('loginStatus').textContent = msg || '';
-}
-
-function enableAuthedUI(isAuthed) {
-  el('btnLogout').disabled = !isAuthed;
-  el('btnLogin').disabled = isAuthed;
-  el('btnLoad').disabled = !isAuthed;
-  el('btnSave').disabled = !isAuthed;
-  el('btnClear').disabled = !isAuthed;
-  el('btnDownload').disabled = !isAuthed;
-  el('weekSelect').disabled = !isAuthed;
-  el('sundayDate').disabled = !isAuthed;
-  el('btnDeleteWeek').disabled = !isAuthed;
+function enableUI() {
+  // Enable inputs by default; disable actions until a week is selected
+  const hasWeek = !!currentWeekEnding;
+  el('btnLoad').disabled = !hasWeek;
+  el('btnSave').disabled = !hasWeek;
+  el('btnClear').disabled = !hasWeek;
+  el('btnDownload').disabled = !hasWeek;
+  el('btnDeleteWeek').disabled = !hasWeek;
+  el('weekSelect').disabled = false;
+  el('sundayDate').disabled = false;
 }
 
 function toISODate(d) {
@@ -189,63 +183,13 @@ function computeTotals() {
 
 async function apiFetch(url, opts={}) {
   const headers = opts.headers ? {...opts.headers} : {};
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+    if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
   const res = await fetch(url, {...opts, headers});
   if (!res.ok) {
     const txt = await res.text().catch(()=> '');
     throw new Error(`${res.status} ${res.statusText}${txt ? ' - ' + txt : ''}`);
   }
   return res;
-}
-
-async function login() {
-  const username = el('username').value.trim();
-  const password = el('password').value;
-  setLoginStatus('');
-  setStatus('');
-  try {
-    const res = await fetch(API.login, {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({username, password})
-    });
-    if (!res.ok) throw new Error('Login failed');
-    const out = await res.json();
-    token = out.token;
-    localStorage.setItem('expenses_token', token);
-    setLoginStatus('Logged in.');
-    enableAuthedUI(true);
-    await refreshWeeks();
-    // Keep current selection, but ensure dropdown is populated
-  } catch (e) {
-    token = '';
-    localStorage.removeItem('expenses_token');
-    enableAuthedUI(false);
-    setLoginStatus('Login failed. Check username/password and Cloudflare env vars.');
-  }
-}
-
-function logout() {
-  token = '';
-  localStorage.removeItem('expenses_token');
-  enableAuthedUI(false);
-  setLoginStatus('Logged out.');
-}
-
-async function loadWeek() {
-  if (!currentWeekEnding) return;
-  setStatus('Loading…');
-  try {
-    const res = await apiFetch(`${API.data}?weekEnding=${encodeURIComponent(currentWeekEnding)}`);
-    const out = await res.json();
-    applyData(out);
-    setStatus('Loaded.');
-  } catch (e) {
-    // If not found, treat as blank
-    clearInputs();
-    setStatus('No saved data yet (starting fresh).');
-  }
 }
 
 async function refreshWeeks() {
@@ -321,7 +265,7 @@ async function deleteWeek() {
 }
 
 function scheduleAutosave() {
-  if (!token) return;
+  if (!) return;
   if (!currentWeekEnding) return;
   setStatus('Editing…');
   if (autosaveTimer) clearTimeout(autosaveTimer);
@@ -376,24 +320,6 @@ async function downloadExcel() {
 // UI wiring
 buildTable();
 
-el('btnLogin').addEventListener('click', login);
-el('btnLogout').addEventListener('click', logout);
-el('btnLoad').addEventListener('click', loadWeek);
-el('btnSave').addEventListener('click', saveWeek);
-el('btnClear').addEventListener('click', () => { clearInputs(); setStatus('Cleared (not deleted).'); scheduleAutosave(); });
-el('btnDownload').addEventListener('click', downloadExcel);
-el('btnDeleteWeek').addEventListener('click', deleteWeek);
-
-el('weekSelect').addEventListener('change', () => {
-  const we = el('weekSelect').value;
-  if (!we) return;
-  currentWeekEnding = we;
-  el('weekEnding').value = currentWeekEnding;
-  const sun = computeSunday(parseISODate(currentWeekEnding));
-  el('sundayDate').value = toISODate(sun);
-  if (token) loadWeek();
-});
-
 el('sundayDate').addEventListener('change', () => {
   const v = el('sundayDate').value;
   if (!v) return;
@@ -404,7 +330,7 @@ el('sundayDate').addEventListener('change', () => {
   el('weekEnding').value = currentWeekEnding;
   ensureWeekOption(currentWeekEnding);
   el('weekSelect').value = currentWeekEnding;
-  if (token) loadWeek();
+  loadWeek();
 });
 
 el('businessPurpose').addEventListener('input', () => scheduleAutosave());
@@ -417,21 +343,16 @@ el('cellD55').addEventListener('input', () => scheduleAutosave());
   const sun = new Date(today);
   sun.setDate(today.getDate() - today.getDay());
   el('sundayDate').value = toISODate(sun);
+
   const sat = new Date(sun);
   sat.setDate(sun.getDate() + 6);
   currentWeekEnding = toISODate(sat);
   el('weekEnding').value = currentWeekEnding;
-  computeTotals();
 
-  if (token) {
-    enableAuthedUI(true);
-    setLoginStatus('Logged in (saved session).');
-    refreshWeeks().then(() => {
-      ensureWeekOption(currentWeekEnding);
-      el('weekSelect').value = currentWeekEnding;
-      loadWeek();
-    });
-  } else {
-    enableAuthedUI(false);
-  }
+  enableUI();
+  refreshWeeks().then(() => {
+    ensureWeekOption(currentWeekEnding);
+    el('weekSelect').value = currentWeekEnding;
+    loadWeek();
+  });
 })();

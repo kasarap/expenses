@@ -1,40 +1,39 @@
-import { requireAuth } from './_auth.js';
+function json(data, status=200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+  });
+}
 
-export async function onRequestGet(context) {
+export async function onRequest(context) {
   const { request, env } = context;
-  const auth = await requireAuth(request, env);
-  if (!auth.ok) return new Response(auth.msg, { status: auth.status });
+  const kv = env.EXPENSES_KV;
+  if (!kv) return json({ error: 'Missing KV binding EXPENSES_KV' }, 500);
 
   const url = new URL(request.url);
   const weekEnding = (url.searchParams.get('weekEnding') || '').trim();
-  if (!weekEnding) return new Response('Missing weekEnding', { status: 400 });
+  if (!weekEnding) return json({ error: 'Missing weekEnding' }, 400);
 
   const key = `expenses:${weekEnding}`;
-  const val = await env.EXPENSES_KV.get(key);
-  if (!val) return new Response('Not found', { status: 404 });
+  const method = request.method.toUpperCase();
 
-  return new Response(val, { headers: { 'Content-Type': 'application/json' }});
-}
+  if (method === 'GET') {
+    const data = await kv.get(key, { type: 'json' });
+    return json({ weekEnding, data: data || null });
+  }
 
-export async function onRequestPut(context) {
-  const { request, env } = context;
-  const auth = await requireAuth(request, env);
-  if (!auth.ok) return new Response(auth.msg, { status: auth.status });
+  if (method === 'PUT' || method === 'POST') {
+    let body;
+    try { body = await request.json(); }
+    catch { return json({ error: 'Invalid JSON' }, 400); }
+    await kv.put(key, JSON.stringify(body));
+    return json({ ok: true });
+  }
 
-  const body = await request.json().catch(() => null);
-  if (!body || !body.weekEnding) return new Response('Bad body', { status: 400 });
+  if (method === 'DELETE') {
+    await kv.delete(key);
+    return json({ ok: true });
+  }
 
-  const weekEnding = String(body.weekEnding).trim();
-  const key = `expenses:${weekEnding}`;
-
-  // Store only what we need
-  const out = {
-    weekEnding,
-    businessPurpose: String(body.businessPurpose || ''),
-    entries: body.entries || {},
-    updatedAt: new Date().toISOString()
-  };
-
-  await env.EXPENSES_KV.put(key, JSON.stringify(out));
-  return new Response('OK', { status: 200 });
+  return json({ error: 'Method not allowed' }, 405);
 }
