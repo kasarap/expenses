@@ -45,7 +45,6 @@ const rows = [
 
 let currentWeekEnding = ''; // YYYY-MM-DD
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
-let pendingAction = null;
 let entryIndex = new Map(); // sync -> {weekEnding}
 
 function safeFilenameBase(weekEndingISO, businessPurpose){
@@ -655,37 +654,31 @@ el('btnDownload').addEventListener('click', downloadExcel);
   renderSync();
 
   // Sync dialog (like test-entry-log)
-  el('btnChangeSync')?.addEventListener('click', ()=>{
-    pendingAction = null;
-    openSyncDialog();
-  });
-
-  el('syncDialog')?.addEventListener('close', async ()=>{
-    const dlg = el('syncDialog');
-    if (!dlg) return;
-    if (dlg.returnValue !== 'ok') { pendingAction = null; return; }
-
-    const v = sanitizeSyncName(el('syncInput')?.value || '');
+  el('btnChangeSync')?.addEventListener('click', async ()=>{
+    const v = askSyncName();
     if (!v){
       setStatus('Sync Name not set.', true);
-      pendingAction = null;
-      renderSync();
-      setButtonsEnabled();
       return;
     }
     currentSync = v;
     renderSync();
-
-    // If this sync exists in dropdown, select it
-    if (entryIndex.has(currentSync)) el('weekSelect').value = currentSync;
-
     setButtonsEnabled();
 
-    const act = pendingAction;
-    pendingAction = null;
-    if (act === 'save') await saveWeek();
-    if (act === 'export') await downloadExcel();
+    // If this sync exists in dropdown, select and load it
+    if (entryIndex.has(currentSync)){
+      el('weekSelect').value = currentSync;
+      const meta = entryIndex.get(currentSync);
+      const we = meta && meta.weekEnding ? meta.weekEnding : '';
+      if (we){
+        currentWeekEnding = we;
+        el('weekEnding').value = we;
+        el('sundayDate').value = toISODate(computeSundayFromWeekEnding(we));
+      }
+      await loadWeek();
+    }
   });
+
+});
 
   refreshWeekDropdown().then(async ()=>{
     // On page load, automatically select and load the most recently edited entry (top of dropdown)
@@ -729,36 +722,29 @@ function renderSync(){
   if (pill) pill.textContent = currentSync || 'Not set';
   localStorage.setItem('expenses_sync_name', currentSync || '');
 }
-function openSyncDialog(){
-  const dlg = el('syncDialog');
-  const inp = el('syncInput');
-  if (!dlg || !inp) return;
-  inp.value = currentSync || '';
-  dlg.showModal();
-  setTimeout(()=>inp.focus(), 0);
+function askSyncName(){
+  const vRaw = window.prompt('Sync Name:', currentSync || '');
+  if (vRaw === null) return null; // cancelled
+  const v = sanitizeSyncName(String(vRaw));
+  return v || null;
 }
 
-// Make Enter in the Sync Name input behave like clicking "Save" (value="ok").
-// On many browsers the default submit button is the first one (Cancel), which
-// causes the dialog to close with returnValue="cancel" and the Sync Name never
-// persists.
-document.addEventListener('DOMContentLoaded', () => {
-  const dlg = el('syncDialog');
-  const inp = el('syncInput');
-  if (!dlg || !inp) return;
-  inp.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      dlg.close('ok');
-    }
-  });
-});
-function ensureSync(action){
+function ensureSync(_action){
   if (currentSync) return true;
-  pendingAction = action || pendingAction;
-  openSyncDialog();
-  setStatus('Set Sync Name to save/sync.', true);
-  return false;
+  const v = askSyncName();
+  if (!v){
+    setStatus('Sync Name not set.', true);
+    renderSync();
+    setButtonsEnabled();
+    return false;
+  }
+  currentSync = v;
+  renderSync();
+  // If this sync exists in dropdown, select it (but do not force-load automatically)
+  if (entryIndex.has(currentSync)) el('weekSelect').value = currentSync;
+  setButtonsEnabled();
+  return true;
 }
+
 
 
