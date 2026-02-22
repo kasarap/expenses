@@ -5,30 +5,30 @@ function json(data, status=200) {
   });
 }
 
-async function listAllKeys(kv, prefix) {
-  const out = [];
-  let cursor = undefined;
-  while (true) {
-    const res = await kv.list({ prefix, cursor });
-    if (res?.keys?.length) out.push(...res.keys);
-    if (res?.list_complete) break;
-    cursor = res?.cursor;
-    if (!cursor) break;
-  }
-  return out;
-}
-
 export async function onRequest(context) {
-  const { env } = context;
+  const { request, env } = context;
   const kv = env.EXPENSES_KV;
   if (!kv) return json({ error: 'Missing KV binding EXPENSES_KV' }, 500);
 
-  const keys = await listAllKeys(kv, 'expenses:');
-  const syncs = keys.map(k => k.name.replace(/^expenses:/,''));
+  // KV list() paginates. Walk all pages so older entries always show.
+  let cursor = undefined;
+  const keys = [];
+  while (true) {
+    const page = await kv.list({ prefix: 'expenses:', cursor });
+    for (const k of (page.keys || [])) {
+      keys.push(k.name.replace(/^expenses:/,''));
+    }
+    if (!page.list_complete) {
+      cursor = page.cursor;
+      if (!cursor) break;
+    } else {
+      break;
+    }
+  }
 
-  // Pull metadata from each record so we can sort and label.
+  // Pull metadata from each record so we can sort by most recently edited.
   const entries = [];
-  for (const sync of syncs) {
+  for (const sync of keys) {
     let data = null;
     try { data = await kv.get(`expenses:${sync}`, { type: 'json' }); } catch {}
     const we = (data && typeof data.weekEnding === 'string') ? data.weekEnding : '';
@@ -37,16 +37,18 @@ export async function onRequest(context) {
     entries.push({ sync, weekEnding: we, businessPurpose: bp, updatedAt });
   }
 
-  // Sort: newest week ending first; fallback to updatedAt desc; then sync.
+  // Sort by updatedAt desc (most recently edited first). Fallback to weekEnding desc, then sync.
   entries.sort((a,b)=>{
-    const aw=a.weekEnding||'';
-    const bw=b.weekEnding||'';
-    if (aw && bw && aw !== bw) return bw.localeCompare(aw); // ISO yyyy-mm-dd sorts lexicographically
     const au=a.updatedAt||'';
     const bu=b.updatedAt||'';
-    if (au && bu && au !== bu) return bu.localeCompare(au);
-    if (bu && !au) return 1;
-    if (au && !bu) return -1;
+    if (au && bu) return bu.localeCompare(au);
+    if (bu) return 1;
+    if (au) return -1;
+    const aw=a.weekEnding||'';
+    const bw=b.weekEnding||'';
+    if (aw && bw) return bw.localeCompare(aw);
+    if (bw) return 1;
+    if (aw) return -1;
     return String(b.sync).localeCompare(String(a.sync));
   });
 

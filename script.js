@@ -213,21 +213,33 @@ function allInputs(){
   return Array.from(el('entryTable').querySelectorAll('input'));
 }
 
-function clearInputs(){
-  // Clear all entry fields + dates (does NOT delete cloud)
+function clearInputs(opts={}){
+  // Clear all entry fields (does NOT delete cloud)
+  const {
+    resetDates = true,
+    resetSync = true,
+    resetWeekSelect = true,
+  } = opts;
   allInputs().forEach(i=>i.value='');
   el('businessPurpose').value='';
-  el('sundayDate').value='';
-  el('weekEnding').value='';
-  currentWeekEnding = null;
 
-  // Reset current sync so next Save prompts for a new Sync Name
-  currentSync = '';
-  renderSync();
+  if (resetDates){
+    el('sundayDate').value='';
+    el('weekEnding').value='';
+    currentWeekEnding = '';
+  }
 
-  // Reset dropdown selection
-  const sel = el('weekSelect');
-  if (sel) sel.value = '';
+  if (resetSync){
+    // Reset current sync so next Save prompts for a new Sync Name
+    currentSync = '';
+    renderSync();
+  }
+
+  if (resetWeekSelect){
+    // Reset dropdown selection
+    const sel = el('weekSelect');
+    if (sel) sel.value = '';
+  }
 
   computeTotals();
   setStatus('Cleared. Enter a Sunday date (and set Sync Name on Save).');
@@ -293,7 +305,8 @@ function serialize(){
 }
 
 function applyData(data){
-  clearInputs();
+  // When loading existing data, do NOT clear Sync Name.
+  clearInputs({ resetSync:false, resetWeekSelect:false, resetDates:false });
   if (!data) return;
   el('businessPurpose').value = data.businessPurpose || '';
   const map = data.entries || {};
@@ -367,7 +380,7 @@ el('sundayDate').value = toISODate(computeSundayFromWeekEnding(currentWeekEnding
 }
 
 async function saveWeek(){
-  if (!ensureSync('save')) return;
+  if (!ensureSync()) return;
   setStatus('Saving…');
   try{
     await apiFetchJson(`${API.data}?sync=${encodeURIComponent(currentSync)}`, {
@@ -401,8 +414,8 @@ async function deleteWeek(){
 
 async function downloadExcel(){
   if (!currentWeekEnding) return;
-  // Optional: require sync only to keep behavior consistent with saved datasets
-  if (!ensureSync('export')) return;
+  // Optional: require sync so exports stay associated with a dataset
+  if (!ensureSync()) return;
   setStatus('Building Excel…');
   try{
     if (typeof JSZip === 'undefined') throw new Error('JSZip library not loaded');
@@ -612,6 +625,15 @@ function setWeekFromSunday(sundayISO){
 el('sundayDate').addEventListener('change', ()=>{
   const v = el('sundayDate').value;
   if (!v) return;
+  // If the user changes weeks, start fresh automatically.
+  // (Does not delete cloud; just clears the form and resets Sync.)
+  if (currentWeekEnding){
+    const nextWE = toISODate(computeWeekEndingFromSunday(v));
+    if (nextWE !== currentWeekEnding){
+      clearInputs({ resetDates:false, resetWeekSelect:true, resetSync:true });
+      el('businessPurpose').value='';
+    }
+  }
   setWeekFromSunday(v);
   setButtonsEnabled();
 });
@@ -636,7 +658,7 @@ el('weekSelect').addEventListener('change', async ()=>{
 
 el('btnSave').addEventListener('click', saveWeek);
 el('btnDeleteWeek').addEventListener('click', deleteWeek);
-el('btnClear').addEventListener('click', ()=>{ clearInputs(); setStatus('Cleared (not deleted).'); });
+el('btnClear').addEventListener('click', ()=>{ clearInputs({resetDates:true, resetSync:true, resetWeekSelect:true}); setStatus('Cleared (not deleted).'); });
 el('btnDownload').addEventListener('click', downloadExcel);
 
 // Init (render table independent of sync state)
@@ -653,32 +675,17 @@ el('btnDownload').addEventListener('click', downloadExcel);
 
   renderSync();
 
-  // Sync dialog (like test-entry-log)
-  el('btnChangeSync')?.addEventListener('click', async ()=>{
-    const v = askSyncName();
-    if (!v){
-      setStatus('Sync Name not set.', true);
-      return;
-    }
-    currentSync = v;
+  // Sync change button (prompt-style, like test-entry-log)
+  el('btnChangeSync')?.addEventListener('click', ()=>{
+    const v = prompt('Sync Name', currentSync || '');
+    const s = sanitizeSyncName(v || '');
+    if (!s) return;
+    currentSync = s;
     renderSync();
+    // If this exists in dropdown, select it
+    if (entryIndex.has(currentSync)) el('weekSelect').value = currentSync;
     setButtonsEnabled();
-
-    // If this sync exists in dropdown, select and load it
-    if (entryIndex.has(currentSync)){
-      el('weekSelect').value = currentSync;
-      const meta = entryIndex.get(currentSync);
-      const we = meta && meta.weekEnding ? meta.weekEnding : '';
-      if (we){
-        currentWeekEnding = we;
-        el('weekEnding').value = we;
-        el('sundayDate').value = toISODate(computeSundayFromWeekEnding(we));
-      }
-      await loadWeek();
-    }
   });
-
-});
 
   refreshWeekDropdown().then(async ()=>{
     // On page load, automatically select and load the most recently edited entry (top of dropdown)
@@ -722,29 +729,18 @@ function renderSync(){
   if (pill) pill.textContent = currentSync || 'Not set';
   localStorage.setItem('expenses_sync_name', currentSync || '');
 }
-function askSyncName(){
-  const vRaw = window.prompt('Sync Name:', currentSync || '');
-  if (vRaw === null) return null; // cancelled
-  const v = sanitizeSyncName(String(vRaw));
-  return v || null;
-}
-
-function ensureSync(_action){
+function ensureSync(){
   if (currentSync) return true;
-  const v = askSyncName();
-  if (!v){
-    setStatus('Sync Name not set.', true);
-    renderSync();
-    setButtonsEnabled();
+  const v = prompt('Sync Name', '');
+  const s = sanitizeSyncName(v || '');
+  if (!s) {
+    setStatus('Sync Name not set.');
     return false;
   }
-  currentSync = v;
+  currentSync = s;
   renderSync();
-  // If this sync exists in dropdown, select it (but do not force-load automatically)
-  if (entryIndex.has(currentSync)) el('weekSelect').value = currentSync;
   setButtonsEnabled();
   return true;
 }
-
 
 
