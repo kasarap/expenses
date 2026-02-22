@@ -23,14 +23,14 @@
       <h2>Week</h2>
       <div class="grid3">
         <label>Pick a saved week
-          <select id="weekSelect" disabled>
+          <select id="weekSelect">
             <option value="">(Select a week)</option>
           </select>
         </label>
         <label>Sunday date (you enter)
-          <input id="sundayDate" type="date" disabled>
+          <input id="sundayDate" type="date">
         </label>
-        <label>Week Ending (Saturday) — Sync Name
+        <label>Week Ending (Saturday)
           <input id="weekEnding" type="date" disabled>
         </label>
       </div>
@@ -43,20 +43,16 @@
         <label>Business Purpose of Expenses
           <input id="businessPurpose" placeholder="e.g., Angelton Flights">
         </label>
-        <label>D55 (Employee signature date or notes)
-          <input id="cellD55" placeholder="">
-        </label>
-      </div>
+</div>
 
       <div class="row">
-        <button id="btnLoad" class="primary" disabled>Load week</button>
-        <button id="btnSave" class="ghost" disabled>Save now</button>
+<button id="btnSave" class="ghost" disabled>Save now</button>
         <button id="btnClear" class="danger" disabled>Clear inputs (does not delete cloud)</button>
         <span id="saveStatus" class="status"></span>
       </div>
 
       <div class="hint">
-        Your <b>Sync Name</b> is the Week Ending (Saturday) date. Enter only the <b>Sunday</b> date; the week and Excel date row are filled automatically.
+        Enter only the Sunday date — the Week Ending (Saturday) and the Excel date row are filled automatically.
       </div>
     </section>
 
@@ -87,10 +83,7 @@
           </div>
         </div>
       </div>
-      <div class="hint">
-        Included rows: 8–10, 18–23, 25–26, 34, 36, 38, 39, 42–44 (columns C–I).
-      </div>
-    </section>
+</section>
   </main>
 
   <script src="script.js"></script>
