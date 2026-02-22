@@ -1,49 +1,40 @@
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      'Content-Type': 'application/json',
-      'Cache-Control': 'no-store',
-    },
-  });
-}
-
-async function listAll(kv, opts) {
-  const out = [];
-  let cursor;
-  do {
-    const res = await kv.list({ ...opts, cursor });
-    out.push(...(res.keys || []));
-    cursor = res.list_complete ? undefined : res.cursor;
-  } while (cursor);
-  return out;
-}
 
 export async function onRequest(context) {
   const { request, env } = context;
-  const kv = env.EXPENSES_KV;
-  if (!kv) return json({ error: 'Missing KV binding EXPENSES_KV' }, 500);
-
   const url = new URL(request.url);
   const sync = (url.searchParams.get('sync') || '').trim();
-  if (!sync) return json({ entries: [] });
+  if (!sync) return json({ weeks: [] }, 200);
 
-  const keys = await listAll(kv, { prefix: `expenses:${sync}:` });
-  const weekEndings = keys
-    .map((k) => String(k.name).split(':').slice(-1)[0])
-    .filter(Boolean)
-    .sort((a, b) => b.localeCompare(a));
-
-  const entries = [];
-  for (const we of weekEndings) {
-    let data = null;
-    try {
-      data = await kv.get(`expenses:${sync}:${we}`, { type: 'json' });
-    } catch {}
-    const bp = data && typeof data.businessPurpose === 'string' ? data.businessPurpose : '';
-    const updatedAt = data && typeof data.updatedAt === 'string' ? data.updatedAt : '';
-    entries.push({ weekEnding: we, businessPurpose: bp, updatedAt });
+  const prefix = `expenses:${sync}:`;
+  let cursor = undefined;
+  const weeks = [];
+  while (true) {
+    const page = await env.EXPENSES_KV.list({ prefix, cursor, limit: 1000 });
+    for (const k of page.keys) {
+      const we = k.name.slice(prefix.length);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(we)) continue;
+      // read minimal record to get businessPurpose + updatedAt
+      const rec = await env.EXPENSES_KV.get(k.name, 'json');
+      weeks.push({
+        weekEnding: we,
+        businessPurpose: rec?.businessPurpose || rec?.data?.businessPurpose || '',
+        updatedAt: rec?.updatedAt || ''
+      });
+    }
+    if (page.list_complete) break;
+    cursor = page.cursor;
+    if (!cursor) break;
   }
 
-  return json({ sync, entries });
+  // sort newest weekEnding first
+  weeks.sort((a,b) => (b.weekEnding || '').localeCompare(a.weekEnding || ''));
+
+  return json({ weeks }, 200);
+}
+
+function json(obj, status = 200) {
+  return new Response(JSON.stringify(obj), {
+    status,
+    headers: { 'content-type': 'application/json; charset=utf-8' }
+  });
 }
