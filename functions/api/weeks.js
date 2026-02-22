@@ -1,3 +1,4 @@
+
 function json(data, status=200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -5,26 +6,24 @@ function json(data, status=200) {
   });
 }
 
-function bad(msg, status=400){ return json({ error: msg }, status); }
-
 export async function onRequest(context) {
   const { request, env } = context;
   const kv = env.EXPENSES_KV;
-  if (!kv) return bad('Missing KV binding EXPENSES_KV', 500);
+  if (!kv) return json({ error: 'Missing KV binding EXPENSES_KV' }, 500);
 
   const url = new URL(request.url);
   const sync = (url.searchParams.get('sync') || '').trim();
-  if (!sync) return bad('Missing sync');
+  if (!sync) return json({ error: 'Missing sync' }, 400);
 
   const prefix = `expenses:${sync}:`;
   let cursor = undefined;
   const keys = [];
 
-  // paginate through all keys
+  // paginate
   for (let i=0; i<50; i++){
     const res = await kv.list({ prefix, cursor });
     for (const k of (res.keys || [])) keys.push(k.name);
-    if (!res.list_complete && res.cursor) {
+    if (!res.list_complete && res.cursor){
       cursor = res.cursor;
     } else {
       break;
@@ -33,23 +32,24 @@ export async function onRequest(context) {
 
   const entries = [];
   for (const name of keys){
-    const weekEnding = name.slice(prefix.length); // YYYY-MM-DD
-    let data = null;
-    try { data = await kv.get(name, { type: 'json' }); } catch {}
-    const bp = (data && typeof data.businessPurpose === 'string') ? data.businessPurpose : '';
-    const updatedAt = (data && typeof data.updatedAt === 'string') ? data.updatedAt : '';
-    entries.push({ weekEnding, businessPurpose: bp, updatedAt });
+    const weekEnding = name.slice(prefix.length);
+    let rec = null;
+    try { rec = await kv.get(name, { type: 'json' }); } catch {}
+    const updatedAt = rec && typeof rec.updatedAt === 'string' ? rec.updatedAt : '';
+    const businessPurpose = rec && typeof rec.businessPurpose === 'string' ? rec.businessPurpose : '';
+    const fileBase = rec && typeof rec.fileBase === 'string' ? rec.fileBase : '';
+    entries.push({ weekEnding, updatedAt, businessPurpose, fileBase, sync });
   }
 
-  // Sort newest week ending first; tie-break by updatedAt desc
+  // sort newest week ending first; tiebreaker updatedAt desc
   entries.sort((a,b)=>{
-    const aw=a.weekEnding||'';
-    const bw=b.weekEnding||'';
+    const aw = a.weekEnding || '';
+    const bw = b.weekEnding || '';
     if (aw && bw && aw !== bw) return bw.localeCompare(aw);
-    const au=a.updatedAt||'';
-    const bu=b.updatedAt||'';
-    return (bu||'').localeCompare(au||'');
+    const au = a.updatedAt || '';
+    const bu = b.updatedAt || '';
+    return (bu || '').localeCompare(au || '');
   });
 
-  return json({ sync, entries });
+  return json({ entries });
 }
