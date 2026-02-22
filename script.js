@@ -343,52 +343,122 @@ async function downloadExcel(){
   if (!currentWeekEnding) return;
   setStatus('Building Excel…');
   try{
-    await ensureXLSX();
-    if (typeof XLSX === 'undefined') throw new Error('XLSX library not loaded');
+    if (typeof JSZip === 'undefined') throw new Error('JSZip library not loaded');
 
-    // Template fetch: try encoded and unencoded paths (some deployments normalize filenames)
-    let templateRes = await fetch('/Expenses%20Form.xlsx', {cache:'no-store'}).catch(()=>null);
-    if (!templateRes || !templateRes.ok) templateRes = await fetch('Expenses%20Form.xlsx', {cache:'no-store'});
-    if (!templateRes.ok) templateRes = await fetch('/Expenses Form.xlsx', {cache:'no-store'});
-    if (!templateRes.ok) templateRes = await fetch('Expenses Form.xlsx', {cache:'no-store'});
-    if (!templateRes.ok) throw new Error('Template not found');
-    const buf = await templateRes.arrayBuffer();
-    const wb = XLSX.read(buf, {type:'array'});
-    const ws = wb.Sheets['Page 1'] || wb.Sheets[wb.SheetNames[0]];
+    // Fetch template (try encoded + unencoded paths)
+    const candidates = [
+      '/Expenses%20Form.xlsx','Expenses%20Form.xlsx','/Expenses Form.xlsx','Expenses Form.xlsx'
+    ];
+    let res=null;
+    for (const url of candidates){
+      try{
+        res = await fetch(url, {cache:'no-store'});
+        if (res && res.ok) break;
+      } catch {}
+    }
+    if (!res || !res.ok) throw new Error('Template not found');
+    const ab = await res.arrayBuffer();
 
-    // Week Ending (E4) and Business Purpose (G4)
-    ws['E4'] = {t:'s', v: currentWeekEnding};
-    const bp = el('businessPurpose').value || '';
-    ws['G4'] = {t:'s', v: bp};
+    const zip = await JSZip.loadAsync(ab);
 
-    // Date row (C7..I7)
-    const sat = parseISODate(currentWeekEnding);
-    const sun = computeSundayFromWeekEnding(currentWeekEnding);
+    // Load sheet XML
+    const sheetPath = 'xl/worksheets/sheet1.xml';
+    const sheetXml = await zip.file(sheetPath).async('string');
+    const parser = new DOMParser();
+    const sheetDoc = parser.parseFromString(sheetXml, 'application/xml');
+
+    const bp = (el('businessPurpose')?.value || '').trim();
+    const satISO = currentWeekEnding;
+    const sat = parseISODate(satISO);
+    const sun = computeSundayFromWeekEnding(satISO);
+
+    // Helpers
+    const xmlNS = sheetDoc.documentElement.namespaceURI;
+    function qsa(node, sel){ return Array.from(node.querySelectorAll(sel)); }
+    function findCell(ref){ return sheetDoc.querySelector(`c[r="${ref}"]`); }
+    function ensureRow(rowNum){
+      const sheetData = sheetDoc.getElementsByTagName('sheetData')[0];
+      let row = sheetDoc.querySelector(`row[r="${rowNum}"]`);
+      if (row) return row;
+      row = sheetDoc.createElementNS(xmlNS, 'row');
+      row.setAttribute('r', String(rowNum));
+      const rows = qsa(sheetData, 'row');
+      const after = rows.find(r => parseInt(r.getAttribute('r'),10) > rowNum);
+      if (after) sheetData.insertBefore(row, after);
+      else sheetData.appendChild(row);
+      return row;
+    }
+    function colToNum(col){
+      let n=0;
+      for (const ch of col){ n = n*26 + (ch.charCodeAt(0)-64); }
+      return n;
+    }
+    function splitRef(ref){
+      const m = ref.match(/^([A-Z]+)(\d+)$/);
+      return {col:m[1], row:parseInt(m[2],10)};
+    }
+    function ensureCell(ref){
+      let cell = findCell(ref);
+      if (cell) return cell;
+      const {col,row} = splitRef(ref);
+      const rowEl = ensureRow(row);
+      cell = sheetDoc.createElementNS(xmlNS,'c');
+      cell.setAttribute('r', ref);
+      const cells = qsa(rowEl,'c');
+      const target = colToNum(col);
+      const after = cells.find(c => colToNum(splitRef(c.getAttribute('r')).col) > target);
+      if (after) rowEl.insertBefore(cell, after);
+      else rowEl.appendChild(cell);
+      return cell;
+    }
+    function setCellNumber(ref, num){
+      const cell = ensureCell(ref);
+      cell.removeAttribute('t');
+      while (cell.firstChild) cell.removeChild(cell.firstChild);
+      const v = sheetDoc.createElementNS(xmlNS,'v');
+      v.textContent = String(num);
+      cell.appendChild(v);
+    }
+    function setCellStringInline(ref, str){
+      const cell = ensureCell(ref);
+      cell.setAttribute('t','inlineStr');
+      while (cell.firstChild) cell.removeChild(cell.firstChild);
+      const is = sheetDoc.createElementNS(xmlNS,'is');
+      const t = sheetDoc.createElementNS(xmlNS,'t');
+      if (/^\s|\s$/.test(str)) t.setAttribute('xml:space','preserve');
+      t.textContent = str;
+      is.appendChild(t);
+      cell.appendChild(is);
+    }
+    function fmtMDY(d){ return `${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`; }
+
+    setCellStringInline('E4', fmtMDY(sat));
+    setCellStringInline('G4', bp);
+
     for (let i=0;i<7;i++){
       const d = new Date(sun);
       d.setDate(sun.getDate()+i);
-      const addr = `${dayCols[i]}7`;
-      ws[addr] = {t:'s', v: `${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`};
+      setCellStringInline(`${dayCols[i]}7`, fmtMDY(d));
     }
 
-    // Entries
     const payload = serialize();
     for (const [addr,val] of Object.entries(payload.entries || {})){
-      if (typeof val === 'number') ws[addr] = {t:'n', v: val};
-      else ws[addr] = {t:'s', v: String(val)};
+      if (typeof val === 'number') setCellNumber(addr, val);
+      else setCellStringInline(addr, String(val));
     }
 
-    // Ensure mileage rate cell matches UI constant (B10)
-    ws['B10'] = {t:'n', v: MILEAGE_RATE};
+    setCellNumber('B10', MILEAGE_RATE);
 
-    // Filename: Week m-d through m-d - Business Purpose.xlsx
+    const serializer = new XMLSerializer();
+    zip.file(sheetPath, serializer.serializeToString(sheetDoc));
+
+    const outBlob = await zip.generateAsync({type:'blob'});
+
     const mdSun = fmtMD(sun);
     const mdSat = fmtMD(sat);
-    const safeBp = (bp || 'Expenses').replace(/[\\/:*?"<>|]+/g,'').trim();
-    const out = XLSX.write(wb, {bookType:'xlsx', type:'array'});
-    const blob = new Blob([out], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const safeBp = (bp || 'Expenses').replace(/[\/:*?"<>|]+/g,'').trim();
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
+    a.href = URL.createObjectURL(outBlob);
     a.download = `Week ${mdSun} through ${mdSat} - ${safeBp}.xlsx`;
     document.body.appendChild(a);
     a.click();
@@ -401,34 +471,6 @@ async function downloadExcel(){
   }
 }
 
-// Some networks/ad-blockers block jsdelivr. If XLSX isn't present, try alternate CDNs.
-function loadScript(src){
-  return new Promise((resolve, reject)=>{
-    const s = document.createElement('script');
-    s.src = src;
-    s.async = true;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error(`Failed to load ${src}`));
-    document.head.appendChild(s);
-  });
-}
-
-async function ensureXLSX(){
-  if (typeof XLSX !== 'undefined') return;
-  const candidates = [
-    'https://cdn.jsdelivr.net/npm/xlsx@0.19.3/dist/xlsx.full.min.js',
-    'https://unpkg.com/xlsx@0.19.3/dist/xlsx.full.min.js',
-    'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.19.3/xlsx.full.min.js'
-  ];
-  for (const url of candidates){
-    try{
-      await loadScript(url);
-      if (typeof XLSX !== 'undefined') return;
-    } catch {
-      // try next
-    }
-  }
-}
 
 // UI events
 function setWeekFromSunday(sundayISO){
