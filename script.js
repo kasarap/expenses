@@ -45,6 +45,7 @@ const rows = [
 
 let currentWeekEnding = ''; // YYYY-MM-DD
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
+let pendingAction = null;
 let entryIndex = new Map(); // sync -> {weekEnding}
 
 function safeFilenameBase(weekEndingISO, businessPurpose){
@@ -214,35 +215,30 @@ function allInputs(){
 }
 
 function clearInputs(opts={}){
+  const { resetSync=true, resetWeekSelect=true, resetDates=true } = opts;
+
   // Clear all entry fields (does NOT delete cloud)
-  const {
-    resetDates = true,
-    resetSync = true,
-    resetWeekSelect = true,
-  } = opts;
   allInputs().forEach(i=>i.value='');
   el('businessPurpose').value='';
 
   if (resetDates){
     el('sundayDate').value='';
     el('weekEnding').value='';
-    currentWeekEnding = '';
+    currentWeekEnding = null;
   }
 
   if (resetSync){
-    // Reset current sync so next Save prompts for a new Sync Name
     currentSync = '';
     renderSync();
   }
 
   if (resetWeekSelect){
-    // Reset dropdown selection
     const sel = el('weekSelect');
-    if (sel) sel.value = '';
+    if (sel) sel.value='';
   }
 
   computeTotals();
-  setStatus('Cleared. Enter a Sunday date (and set Sync Name on Save).');
+  setStatus('Cleared.');
 }
 
 function recomputeDerived(){
@@ -305,7 +301,6 @@ function serialize(){
 }
 
 function applyData(data){
-  // When loading existing data, do NOT clear Sync Name.
   clearInputs({ resetSync:false, resetWeekSelect:false, resetDates:false });
   if (!data) return;
   el('businessPurpose').value = data.businessPurpose || '';
@@ -331,114 +326,98 @@ async function apiFetchJson(url, opts={}){
 
 async function refreshWeekDropdown(){
   const sel = el('weekSelect');
-  const keep = sel.value;
   sel.innerHTML = '<option value="">(Select a week)</option>';
-  entryIndex = new Map();
-
-  if (!currentSync){
-    setButtonsEnabled();
-    return;
-  }
+  entryIndex.clear();
+  if (!currentSync) return;
 
   try{
     const out = await apiFetchJson(`${API.weeks}?sync=${encodeURIComponent(currentSync)}`);
     const list = Array.isArray(out.entries) ? out.entries : [];
-    // newest week ending first already, but ensure
-    list.sort((a,b)=> (String(b.weekEnding||'')).localeCompare(String(a.weekEnding||'')));
-    list.forEach(item=>{
-      const we = String(item.weekEnding||'').trim();
+    list.forEach(ent=>{
+      const we = ent.weekEnding || '';
       if (!we) return;
-      entryIndex.set(we, { updatedAt: item.updatedAt || '', businessPurpose: item.businessPurpose || '' });
+      entryIndex.set(we, ent);
       const opt = document.createElement('option');
       opt.value = we;
-      // Label: YY.MM.DD - <export filename base without .xlsx>
-      const sat = parseISODate(we);
-      const prefix = fmtYYMMDD(sat);
-      const base = safeFilenameBase(we, item.businessPurpose || '');
-      opt.textContent = `${prefix} - ${base}`;
+      const base = makeExportFilenameBase(we, ent.businessPurpose || '');
+      opt.textContent = `${fmtYYMMDD(parseISODate(we))} - ${base}`;
       sel.appendChild(opt);
     });
 
-    // keep selection if exists
-    if (keep && entryIndex.has(keep)) sel.value = keep;
-  } catch(e){
-    // keep empty list; show status but don't break UI
-    setStatus('Could not load saved weeks.');
+    if (currentWeekEnding && entryIndex.has(currentWeekEnding)){
+      sel.value = currentWeekEnding;
+    } else if (list.length){
+      currentWeekEnding = list[0].weekEnding;
+      sel.value = currentWeekEnding;
+      await loadWeek(currentWeekEnding);
+    }
+  } catch {
+    // ignore
   }
-  setButtonsEnabled();
 }
 
-async function loadWeek(){
-  if (!currentSync){
-    setStatus('Set Sync Name first.');
-    return;
-  }
-  const sel = el('weekSelect').value;
-  if (!sel){
-    setStatus('Pick a saved week.');
-    return;
-  }
+async function loadWeek(weekEnding){
+  if (!currentSync) return;
+  const we = weekEnding || currentWeekEnding;
+  if (!we) return;
   setStatus('Loading…');
   try{
-    const out = await apiFetchJson(`${API.data}?sync=${encodeURIComponent(currentSync)}&weekEnding=${encodeURIComponent(sel)}`);
-    const data = out && out.data ? out.data : null;
-    if (!data){
-      setStatus('No data found.');
-      return;
-    }
-    applyData(data);
-    setStatus('Loaded.');
+    const out = await apiFetchJson(`${API.data}?sync=${encodeURIComponent(currentSync)}&weekEnding=${encodeURIComponent(we)}`);
+    applyData(out.data);
+    currentWeekEnding = we;
+    el('weekEnding').value = we;
+    el('sundayDate').value = toISODate(computeSundayFromWeekEnding(we));
+    setButtonsEnabled();
+    setStatus(out.data ? 'Loaded.' : 'No saved data (new week).');
   } catch(e){
     setStatus('Load failed.');
-    console.error(e);
   }
 }
 
 async function saveWeek(){
+  if (!ensureSync()) return;
+  if (!currentWeekEnding){
+    const su = el('sundayDate').value;
+    if (su) setWeekFromSunday(su);
+  }
   if (!currentWeekEnding){
     setStatus('Enter a Sunday date first.');
     return;
   }
-  if (!ensureSync()) return;
-
   setStatus('Saving…');
   try{
-    const payload = serialize();
     await apiFetchJson(`${API.data}?sync=${encodeURIComponent(currentSync)}&weekEnding=${encodeURIComponent(currentWeekEnding)}`, {
       method:'PUT',
-      body: JSON.stringify(payload)
+      body: JSON.stringify(serialize())
     });
     setStatus('Saved.');
     await refreshWeekDropdown();
     el('weekSelect').value = currentWeekEnding;
-    setButtonsEnabled();
   } catch(e){
     setStatus('Save failed.');
-    console.error(e);
   }
 }
 
 async function deleteWeek(){
   if (!currentSync || !currentWeekEnding) return;
-  if (!confirm(`Delete saved week ending ${currentWeekEnding} for sync "${currentSync}"?`)) return;
-
+  const label = weekLabelWithPrefix(currentWeekEnding);
+  if (!confirm(`Delete saved data for ${label}?`)) return;
   setStatus('Deleting…');
   try{
-    await apiFetchJson(`${API.data}?sync=${encodeURIComponent(currentSync)}&weekEnding=${encodeURIComponent(currentWeekEnding)}`, { method:'DELETE' });
-    // Clear entries but keep sync
+    await apiFetchJson(`${API.data}?sync=${encodeURIComponent(currentSync)}&weekEnding=${encodeURIComponent(currentWeekEnding)}`, {method:'DELETE'});
     clearInputs({ resetSync:false, resetWeekSelect:true, resetDates:true });
     setStatus('Deleted.');
     await refreshWeekDropdown();
-  } catch(e){
+    el('weekSelect').value='';
+  } catch{
     setStatus('Delete failed.');
-    console.error(e);
   }
 }
 
 async function downloadExcel(){
   if (!currentWeekEnding) return;
-  // Optional: require sync so exports stay associated with a dataset
-  if (!ensureSync()) return;
+  // Optional: require sync only to keep behavior consistent with saved datasets
+  if (!ensureSync('export')) return;
   setStatus('Building Excel…');
   try{
     if (typeof JSZip === 'undefined') throw new Error('JSZip library not loaded');
@@ -542,32 +521,6 @@ async function downloadExcel(){
       v.textContent = String(num);
       cell.appendChild(v);
     }
-
-    function getCellNumber(ref){
-      const cell = findCell(ref);
-      if (!cell) return null;
-      const v = cell.getElementsByTagName('v')[0];
-      if (!v) return null;
-      const n = Number(v.textContent);
-      return Number.isFinite(n) ? n : null;
-    }
-
-    // For cells that already contain a formula (<f>), preserve the formula and
-    // only update the cached value (<v>) so the number shows even if the viewer
-    // doesn't recalculate immediately.
-    function setFormulaCachedValue(ref, num){
-      const cell = ensureCell(ref);
-      const f = cell.getElementsByTagName('f')[0];
-      if (!f) return setCellNumber(ref, num);
-
-      // Remove existing <v> (but keep <f>)
-      const vs = Array.from(cell.getElementsByTagName('v'));
-      vs.forEach(n=>n.parentNode.removeChild(n));
-
-      const v = sheetDoc.createElementNS(xmlNS,'v');
-      v.textContent = String(num);
-      cell.appendChild(v);
-    }
     function setCellStringInline(ref, str){
       const cell = ensureCell(ref);
       cell.setAttribute('t','inlineStr');
@@ -598,19 +551,6 @@ async function downloadExcel(){
       if (typeof val === 'number') setCellNumber(addr, val);
       else setCellStringInline(addr, String(val));
     }
-
-    // Make Personal Car Mileage (row 29) visible even without recalculation.
-    // Preserve the existing formulas; only update cached values.
-    const mileageRate = getCellNumber('B10') ?? MILEAGE_RATE;
-    let mileageWeekTotal = 0;
-    for (let i=0;i<7;i++){
-      const milesVal = payload.entries?.[`${dayCols[i]}10`];
-      const miles = typeof milesVal === 'number' ? milesVal : Number(milesVal);
-      const amt = (Number.isFinite(miles) ? miles : 0) * mileageRate;
-      mileageWeekTotal += amt;
-      setFormulaCachedValue(`${dayCols[i]}29`, amt ? amt : 0);
-    }
-    setFormulaCachedValue('J29', mileageWeekTotal ? mileageWeekTotal : 0);
 
     // Leave template mileage rate in B10 to preserve formatting and any future changes.
     // setCellNumber('B10', MILEAGE_RATE);
@@ -648,37 +588,29 @@ function setWeekFromSunday(sundayISO){
 el('sundayDate').addEventListener('change', ()=>{
   const v = el('sundayDate').value;
   if (!v) return;
-
-  const nextWE = toISODate(computeWeekEndingFromSunday(v));
-
-  // If the user changes weeks, start fresh automatically.
-  // (Does not delete cloud; clears only the entry fields/dates for the new week.)
-  if (currentWeekEnding && nextWE !== currentWeekEnding){
-    clearInputs({ resetDates:false, resetWeekSelect:true, resetSync:false });
-    // keep business purpose? user likely per week; clear it
-    el('businessPurpose').value = '';
+  const newWE = computeWeekEndingFromSunday(v);
+  if (currentWeekEnding && newWE && newWE !== currentWeekEnding){
+    // switched to a different week: clear entries but keep sync
+    clearInputs({ resetSync:false, resetWeekSelect:true, resetDates:false });
   }
-
   setWeekFromSunday(v);
+  setButtonsEnabled();
 });
 
 
 el('weekSelect').addEventListener('change', async ()=>{
   const we = el('weekSelect').value;
   if (!we) return;
-  if (!currentSync){
-    setStatus('Set Sync Name first.');
-    return;
-  }
   currentWeekEnding = we;
   el('weekEnding').value = we;
   el('sundayDate').value = toISODate(computeSundayFromWeekEnding(we));
-  await loadWeek();
+  await loadWeek(we);
+  setButtonsEnabled();
 });
 
 el('btnSave').addEventListener('click', saveWeek);
 el('btnDeleteWeek').addEventListener('click', deleteWeek);
-el('btnClear').addEventListener('click', ()=>{ clearInputs({resetDates:true, resetSync:true, resetWeekSelect:true}); setStatus('Cleared (not deleted).'); });
+el('btnClear').addEventListener('click', ()=>{ clearInputs(); setStatus('Cleared (not deleted).'); });
 el('btnDownload').addEventListener('click', downloadExcel);
 
 // Init (render table independent of sync state)
@@ -686,48 +618,35 @@ el('btnDownload').addEventListener('click', downloadExcel);
   buildTable();
   computeTotals();
 
-  // Default to current week (Sunday of this week)
+  // Default to current week Sunday
   const today = new Date();
   const sun = new Date(today);
   sun.setDate(today.getDate() - today.getDay());
   el('sundayDate').value = toISODate(sun);
   setWeekFromSunday(toISODate(sun));
 
+  // Restore sync name (so it only asks once per device unless cleared)
+  currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
   renderSync();
 
-  // Sync change button (prompt-style, like test-entry-log)
-  el('btnChangeSync')?.addEventListener('click', ()=>{
-    const v = prompt('Sync Name', currentSync || '');
-    const s = sanitizeSyncName(v || '');
-    if (!s) return;
-    currentSync = s;
+  el('btnChangeSync')?.addEventListener('click', async ()=>{
+    const v = prompt('Enter Sync Name', currentSync || '');
+    if (v === null) return;
+    const nv = sanitizeSyncName(v);
+    if (!nv){ alert('Sync Name cannot be blank.'); return; }
+    currentSync = nv;
     renderSync();
-    // If this exists in dropdown, select it
-    if (entryIndex.has(currentSync)) el('weekSelect').value = currentSync;
-    setButtonsEnabled();
+    currentWeekEnding = null;
+    await refreshWeekDropdown();
   });
 
-  refreshWeekDropdown().then(async ()=>{
-    // On page load, if a Sync Name is already set, load the newest saved week for that Sync.
-    if (!currentSync){
-      setButtonsEnabled();
-      return;
-    }
-    const sel = el('weekSelect');
-    const firstReal = Array.from(sel.options).find(o=>o.value);
-    if (firstReal){
-      const we = firstReal.value;
-      sel.value = we;
-      currentWeekEnding = we;
-      el('weekEnding').value = we;
-      el('sundayDate').value = toISODate(computeSundayFromWeekEnding(we));
-      await loadWeek();
-    }
-    setButtonsEnabled();
-  });
+  // Initial dropdown load (if sync exists)
+  refreshWeekDropdown();
 
   setButtonsEnabled();
-})();
+}
+
+init();)();
 
 function setButtonsEnabled(){
   // Save/Clear allowed once a week is selected/entered; Sync Name can be set on first Save.
@@ -737,7 +656,7 @@ function setButtonsEnabled(){
   el('btnClear').disabled = !hasWeek;
   el('btnDownload').disabled = !hasWeek;
   // Delete only if this sync exists in KV list (so we don't delete an unsaved draft)
-  el('btnDeleteWeek').disabled = !(hasSync && hasWeek && entryIndex.has(currentWeekEnding));
+  el('btnDeleteWeek').disabled = !(hasSync && entryIndex.has(currentSync));
 }
 function sanitizeSyncName(s){
   if (!s) return '';
@@ -748,17 +667,26 @@ function renderSync(){
   if (pill) pill.textContent = currentSync || 'Not set';
   localStorage.setItem('expenses_sync_name', currentSync || '');
 }
+function openSyncDialog(){
+  const dlg = el('syncDialog');
+  const inp = el('syncInput');
+  if (!dlg || !inp) return;
+  inp.value = currentSync || '';
+  dlg.showModal();
+  setTimeout(()=>inp.focus(), 0);
+}
 function ensureSync(){
   if (currentSync) return true;
-  const v = prompt('Sync Name', '');
-  const s = sanitizeSyncName(v || '');
-  if (!s) {
-    setStatus('Sync Name not set.');
+  const v = prompt('Enter Sync Name', currentSync || '');
+  if (v === null) return false;
+  const nv = sanitizeSyncName(v);
+  if (!nv){
+    alert('Sync Name cannot be blank.');
     return false;
   }
-  currentSync = s;
+  currentSync = nv;
   renderSync();
-  setButtonsEnabled();
+  refreshWeekDropdown();
   return true;
 }
 

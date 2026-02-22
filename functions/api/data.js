@@ -23,7 +23,7 @@ export async function onRequest(context) {
 
   if (method === 'GET') {
     const data = await kv.get(key, { type: 'json' });
-    return json({ ok:true, sync, weekEnding, data: data || null });
+    return json({ key, sync, weekEnding, data: data || null });
   }
 
   if (method === 'PUT' || method === 'POST') {
@@ -31,26 +31,25 @@ export async function onRequest(context) {
     try { body = await request.json(); }
     catch { return bad('Invalid JSON'); }
     const now = new Date().toISOString();
-
     let existing = null;
     try { existing = await kv.get(key, { type: 'json' }); } catch {}
+    const createdAt = (existing && typeof existing.createdAt === 'string' && existing.createdAt) ? existing.createdAt : now;
 
-    const createdAt = existing?.createdAt || now;
-    const payload = {
+    const merged = {
       ...(body || {}),
-      syncName: sync,
+      sync,
       weekEnding,
       createdAt,
       updatedAt: now,
     };
 
-    await kv.put(key, JSON.stringify(payload));
-    return json({ ok:true });
+    await kv.put(key, JSON.stringify(merged));
+    return json({ ok: true, key, updatedAt: now });
   }
 
   if (method === 'DELETE') {
     await kv.delete(key);
-    return json({ ok:true });
+    return json({ ok: true });
   }
 
   return bad('Method not allowed', 405);

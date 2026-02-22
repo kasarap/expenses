@@ -4,6 +4,7 @@ function json(data, status=200) {
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
   });
 }
+
 function bad(msg, status=400){ return json({ error: msg }, status); }
 
 export async function onRequest(context) {
@@ -16,30 +17,39 @@ export async function onRequest(context) {
   if (!sync) return bad('Missing sync');
 
   const prefix = `expenses:${sync}:`;
-
   let cursor = undefined;
-  const entries = [];
-  while (true) {
-    const res = await kv.list({ prefix, cursor, limit: 1000 });
-    for (const k of res.keys) {
-      const name = k.name; // expenses:sync:YYYY-MM-DD
-      const weekEnding = name.substring(prefix.length);
-      // read minimal metadata
-      let obj = null;
-      try { obj = await kv.get(name, { type:'json' }); } catch {}
-      entries.push({
-        key: name,
-        weekEnding,
-        updatedAt: obj?.updatedAt || null,
-        businessPurpose: obj?.businessPurpose || obj?.businessPurposeOfExpenses || '',
-      });
+  const keys = [];
+
+  // paginate through all keys
+  for (let i=0; i<50; i++){
+    const res = await kv.list({ prefix, cursor });
+    for (const k of (res.keys || [])) keys.push(k.name);
+    if (!res.list_complete && res.cursor) {
+      cursor = res.cursor;
+    } else {
+      break;
     }
-    cursor = res.cursor;
-    if (!res.list_complete) continue;
-    break;
   }
 
-  // sort newest weekEnding first
-  entries.sort((a,b)=> (b.weekEnding || '').localeCompare(a.weekEnding || ''));
-  return json({ ok:true, sync, entries });
+  const entries = [];
+  for (const name of keys){
+    const weekEnding = name.slice(prefix.length); // YYYY-MM-DD
+    let data = null;
+    try { data = await kv.get(name, { type: 'json' }); } catch {}
+    const bp = (data && typeof data.businessPurpose === 'string') ? data.businessPurpose : '';
+    const updatedAt = (data && typeof data.updatedAt === 'string') ? data.updatedAt : '';
+    entries.push({ weekEnding, businessPurpose: bp, updatedAt });
+  }
+
+  // Sort newest week ending first; tie-break by updatedAt desc
+  entries.sort((a,b)=>{
+    const aw=a.weekEnding||'';
+    const bw=b.weekEnding||'';
+    if (aw && bw && aw !== bw) return bw.localeCompare(aw);
+    const au=a.updatedAt||'';
+    const bu=b.updatedAt||'';
+    return (bu||'').localeCompare(au||'');
+  });
+
+  return json({ sync, entries });
 }
