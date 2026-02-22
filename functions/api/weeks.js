@@ -1,8 +1,22 @@
-function json(data, status=200) {
+function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+    },
   });
+}
+
+async function listAll(kv, opts) {
+  const out = [];
+  let cursor;
+  do {
+    const res = await kv.list({ ...opts, cursor });
+    out.push(...(res.keys || []));
+    cursor = res.list_complete ? undefined : res.cursor;
+  } while (cursor);
+  return out;
 }
 
 export async function onRequest(context) {
@@ -14,31 +28,22 @@ export async function onRequest(context) {
   const sync = (url.searchParams.get('sync') || '').trim();
   if (!sync) return json({ entries: [] });
 
-  const prefix = `expenses:${sync}:`;
-
-  // KV list is paginated — walk all pages.
-  let cursor = undefined;
-  const keys = [];
-  for (let i=0; i<100; i++){ // hard cap safety
-    const page = await kv.list({ prefix, cursor, limit: 1000 });
-    (page.keys || []).forEach(k => keys.push(k.name));
-    cursor = page.cursor;
-    if (!cursor) break;
-  }
+  const keys = await listAll(kv, { prefix: `expenses:${sync}:` });
+  const weekEndings = keys
+    .map((k) => String(k.name).split(':').slice(-1)[0])
+    .filter(Boolean)
+    .sort((a, b) => b.localeCompare(a));
 
   const entries = [];
-  for (const key of keys) {
-    // key = expenses:<sync>:<weekEnding>
-    const weekEnding = key.slice(prefix.length);
+  for (const we of weekEndings) {
     let data = null;
-    try { data = await kv.get(key, { type: 'json' }); } catch {}
-    const bp = (data && typeof data.businessPurpose === 'string') ? data.businessPurpose : '';
-    const updatedAt = (data && typeof data.updatedAt === 'string') ? data.updatedAt : '';
-    entries.push({ weekEnding, businessPurpose: bp, updatedAt });
+    try {
+      data = await kv.get(`expenses:${sync}:${we}`, { type: 'json' });
+    } catch {}
+    const bp = data && typeof data.businessPurpose === 'string' ? data.businessPurpose : '';
+    const updatedAt = data && typeof data.updatedAt === 'string' ? data.updatedAt : '';
+    entries.push({ weekEnding: we, businessPurpose: bp, updatedAt });
   }
-
-  // Sort newest week ending first (YYYY-MM-DD sorts lexicographically).
-  entries.sort((a,b)=> String(b.weekEnding||'').localeCompare(String(a.weekEnding||'')));
 
   return json({ sync, entries });
 }
