@@ -295,7 +295,18 @@ async function apiFetchJson(url, opts={}){
 async function refreshWeekDropdown(){
   try{
     const out = await apiFetchJson(API.weeks);
-    const list = Array.isArray(out.entries) ? out.entries : [];
+    let list = Array.isArray(out.entries) ? out.entries : [];
+    // Sort newest year/week first (descending by weekEnding date when available)
+    list = list.slice().sort((a,b)=>{
+      const aw = (a && a.weekEnding) ? String(a.weekEnding) : '';
+      const bw = (b && b.weekEnding) ? String(b.weekEnding) : '';
+      if (aw && bw) return bw.localeCompare(aw); // ISO dates sort lexicographically
+      if (aw) return -1;
+      if (bw) return 1;
+      const as = (a && a.sync) ? String(a.sync) : '';
+      const bs = (b && b.sync) ? String(b.sync) : '';
+      return bs.localeCompare(as);
+    });
     const sel = el('weekSelect');
     const keep = sel.value;
     sel.innerHTML = '<option value="">(Select a week)</option>';
@@ -562,6 +573,7 @@ el('btnDeleteWeek').addEventListener('click', deleteWeek);
 el('btnClear').addEventListener('click', ()=>{ clearInputs(); setStatus('Cleared (not deleted).'); });
 el('btnDownload').addEventListener('click', downloadExcel);
 
+// Init (render table independent of sync state)
 (function init(){
   buildTable();
   computeTotals();
@@ -617,9 +629,7 @@ el('btnDownload').addEventListener('click', downloadExcel);
   });
 
   setButtonsEnabled();
-}
-
-init();;
+})();
 
 function setButtonsEnabled(){
   // Save/Clear allowed once a week is selected/entered; Sync Name can be set on first Save.
