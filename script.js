@@ -44,7 +44,8 @@ const rows = [
 ];
 
 let currentWeekEnding = ''; // YYYY-MM-DD
-let currentSync = '';
+let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
+let pendingAction = null;
 let entryIndex = new Map(); // sync -> {weekEnding}
 
 function toISODate(d){
@@ -87,7 +88,7 @@ function weekLabel(weekEndingISO){
 
 function weekLabelWithPrefix(weekEndingISO){
   const sat = parseISODate(weekEndingISO);
-  return `${fmtYYMMDD(sat)} - ${weekLabel(weekEndingISO)}`;
+  return `${fmtYYMMDD(sat)}`;
 }
 
 function setStatus(msg=''){
@@ -307,7 +308,7 @@ async function refreshWeekDropdown(){
       const opt=document.createElement('option');
       opt.value=sync;
       const labelWE = we || (sync.match(/^\d{4}-\d{2}-\d{2}$/) ? sync : '');
-      opt.textContent = labelWE ? weekLabelWithPrefix(labelWE) : sync;
+      opt.textContent = labelWE ? `${fmtYYMMDD(parseISODate(labelWE))} - ${sync}` : sync;
       sel.appendChild(opt);
     });
     if (keep && entryIndex.has(keep)) sel.value=keep;
@@ -325,9 +326,8 @@ async function loadWeek(){
     if (out.data && typeof out.data.weekEnding === 'string' && out.data.weekEnding){
       currentWeekEnding = out.data.weekEnding;
       el('weekEnding').value = currentWeekEnding;
-      el('weekEndingLabel').value = weekLabelWithPrefix(currentWeekEnding);
-      el('sundayDate').value = toISODate(computeSundayFromWeekEnding(currentWeekEnding));
-      setButtonsEnabled(!!currentSync);
+el('sundayDate').value = toISODate(computeSundayFromWeekEnding(currentWeekEnding));
+      setButtonsEnabled();
     }
     setStatus(out.data ? 'Loaded.' : 'No saved data (new week).');
   } catch(e){
@@ -336,7 +336,7 @@ async function loadWeek(){
 }
 
 async function saveWeek(){
-  if (!currentSync) return;
+  if (!ensureSync('save')) return;
   setStatus('Saving…');
   try{
     await apiFetchJson(`${API.data}?sync=${encodeURIComponent(currentSync)}`, {
@@ -370,6 +370,8 @@ async function deleteWeek(){
 
 async function downloadExcel(){
   if (!currentWeekEnding) return;
+  // Optional: require sync only to keep behavior consistent with saved datasets
+  if (!ensureSync('export')) return;
   setStatus('Building Excel…');
   try{
     if (typeof JSZip === 'undefined') throw new Error('JSZip library not loaded');
@@ -528,50 +530,31 @@ function setWeekFromSunday(sundayISO){
   const sat = computeWeekEndingFromSunday(sundayISO);
   currentWeekEnding = toISODate(sat);
   el('weekEnding').value = currentWeekEnding;
-  el('weekEndingLabel').value = weekLabelWithPrefix(currentWeekEnding);
-  if (!currentSync){
-    currentSync = currentWeekEnding;
-    el('syncName').value = currentSync;
-  }
 }
 
-el('sundayDate').addEventListener('change', async ()=>{
+el('sundayDate').addEventListener('change', ()=>{
   const v = el('sundayDate').value;
   if (!v) return;
-  if (!el('syncName').value.trim()) currentSync = '';
   setWeekFromSunday(v);
-  setButtonsEnabled(true);
-  await loadWeek(); // auto-load if it exists
+  setButtonsEnabled();
 });
+
 
 el('weekSelect').addEventListener('change', async ()=>{
   const v = el('weekSelect').value;
   if (!v) return;
   currentSync = v;
-  el('syncName').value = v;
+  renderSync();
+
   const meta = entryIndex.get(v);
   const we = meta && meta.weekEnding ? meta.weekEnding : (v.match(/^\d{4}-\d{2}-\d{2}$/) ? v : '');
   if (we){
     currentWeekEnding = we;
     el('weekEnding').value = we;
-    el('weekEndingLabel').value = weekLabelWithPrefix(we);
     el('sundayDate').value = toISODate(computeSundayFromWeekEnding(we));
   }
   await loadWeek();
-});
-
-el('syncName').addEventListener('input', ()=>{
-  currentSync = el('syncName').value.trim();
-  setButtonsEnabled(!!currentSync);
-});
-
-el('syncName').addEventListener('keydown', async (e)=>{
-  if (e.key === 'Enter'){
-    e.preventDefault();
-    currentSync = el('syncName').value.trim();
-    setButtonsEnabled(!!currentSync);
-    await loadWeek();
-  }
+  setButtonsEnabled();
 });
 
 el('btnSave').addEventListener('click', saveWeek);
@@ -590,21 +573,87 @@ el('btnDownload').addEventListener('click', downloadExcel);
   el('sundayDate').value = toISODate(sun);
   setWeekFromSunday(toISODate(sun));
 
-  el('syncName').value = currentSync;
+  renderSync();
 
-  refreshWeekDropdown().then(async ()=>{
-    // If this sync exists in dropdown, keep it selected
-    if (entryIndex.has(currentSync)) el('weekSelect').value = currentSync;
-    await loadWeek();
+  // Sync dialog (like test-entry-log)
+  el('btnChangeSync')?.addEventListener('click', ()=>{
+    pendingAction = null;
+    openSyncDialog();
   });
 
-  // enable buttons once we have a sync name
-  setButtonsEnabled(!!currentSync);
-})();
+  el('syncDialog')?.addEventListener('close', async ()=>{
+    const dlg = el('syncDialog');
+    if (!dlg) return;
+    if (dlg.returnValue !== 'ok') { pendingAction = null; return; }
 
-function setButtonsEnabled(on){
-  el('btnSave').disabled = !on;
-  el('btnClear').disabled = !on;
-  el('btnDownload').disabled = !currentWeekEnding;
-  el('btnDeleteWeek').disabled = !on;
+    const v = sanitizeSyncName(el('syncInput')?.value || '');
+    if (!v){
+      setStatus('Sync Name not set.', true);
+      pendingAction = null;
+      renderSync();
+      setButtonsEnabled();
+      return;
+    }
+    currentSync = v;
+    renderSync();
+
+    // If this sync exists in dropdown, select it
+    if (entryIndex.has(currentSync)) el('weekSelect').value = currentSync;
+
+    setButtonsEnabled();
+
+    const act = pendingAction;
+    pendingAction = null;
+    if (act === 'save') await saveWeek();
+    if (act === 'export') await downloadExcel();
+  });
+
+  refreshWeekDropdown().then(async ()=>{
+    if (currentSync && entryIndex.has(currentSync)){
+      el('weekSelect').value = currentSync;
+      await loadWeek();
+    }
+    setButtonsEnabled();
+  });
+
+  setButtonsEnabled();
 }
+
+init();;
+
+function setButtonsEnabled(){
+  // Save/Clear allowed once a week is selected/entered; Sync Name can be set on first Save.
+  const hasWeek = !!currentWeekEnding;
+  const hasSync = !!currentSync;
+  el('btnSave').disabled = !hasWeek;
+  el('btnClear').disabled = !hasWeek;
+  el('btnDownload').disabled = !hasWeek;
+  // Delete only if this sync exists in KV list (so we don't delete an unsaved draft)
+  el('btnDeleteWeek').disabled = !(hasSync && entryIndex.has(currentSync));
+}
+function sanitizeSyncName(s){
+  if (!s) return '';
+  return String(s).trim().replace(/\s+/g,' ').slice(0,80).replace(/[^\w .\-]/g,'');
+}
+function renderSync(){
+  const pill = el('syncPill');
+  if (pill) pill.textContent = currentSync || 'Not set';
+  localStorage.setItem('expenses_sync_name', currentSync || '');
+}
+function openSyncDialog(){
+  const dlg = el('syncDialog');
+  const inp = el('syncInput');
+  if (!dlg || !inp) return;
+  inp.value = currentSync || '';
+  dlg.showModal();
+  setTimeout(()=>inp.focus(), 0);
+}
+function ensureSync(action){
+  if (currentSync) return true;
+  pendingAction = action || pendingAction;
+  openSyncDialog();
+  setStatus('Set Sync Name to save/sync.', true);
+  return false;
+}
+
+

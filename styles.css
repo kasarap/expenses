@@ -69,3 +69,16 @@ input.computed{opacity:.85}
 .totals-row-week{margin-top:10px;}
 .totals-row-week .totals-label{opacity:0;}
 .totals-row-week .totals-week{margin-left:auto;}
+
+
+/* Sync (test-entry-log style) */
+.metaRow{display:flex;align-items:center;gap:10px;margin-top:10px;color:var(--muted);font-size:13px;flex-wrap:wrap}
+.pill{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;border:1px solid var(--line);background:#0c1016;color:var(--text);font-size:13px}
+.linkbtn{background:transparent;border:0;color:var(--accent);cursor:pointer;padding:6px 6px;border-radius:10px}
+.linkbtn:hover{background:rgba(77,163,255,.12)}
+/* Dialog */
+.dialog{border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--text);padding:0;max-width:520px;width:92vw}
+.dialog::backdrop{background:rgba(0,0,0,.6)}
+.dialogForm{padding:14px;display:flex;flex-direction:column;gap:10px}
+.dialogForm h3{margin:0;font-size:16px}
+.dialogBtns{display:flex;gap:10px;justify-content:flex-end}
