@@ -215,18 +215,16 @@ function allInputs(){
 }
 
 function clearInputs(opts = {}){
-  // Clear fields (does NOT delete cloud)
+  // Clear all entry fields (does NOT delete cloud)
   const {
     resetSync = true,
     resetWeekSelect = true,
     resetDates = true,
-    resetBusinessPurpose = true,
-    silent = false
   } = opts;
 
   allInputs().forEach(i=>i.value='');
+  el('businessPurpose').value='';
 
-  if (resetBusinessPurpose) el('businessPurpose').value='';
   if (resetDates){
     el('sundayDate').value='';
     el('weekEnding').value='';
@@ -234,6 +232,7 @@ function clearInputs(opts = {}){
   }
 
   if (resetSync){
+    // Reset current sync so next Save prompts for a new Sync Name
     currentSync = '';
     renderSync();
   }
@@ -244,24 +243,7 @@ function clearInputs(opts = {}){
   }
 
   computeTotals();
-  if (!silent){
-    setStatus('Cleared. Enter a Sunday date (and set Sync Name on Save).');
-  }
-}
-
-function recomputeDerived(){
-  // Personal Car Mileage (row 29) = Business miles (row 10) * MILEAGE_RATE
-  for (let i=0;i<7;i++){
-    const milesInp = el('entryTable').querySelector(`input[data-row="10"][data-col="${dayCols[i]}"]`);
-    const outInp   = el('entryTable').querySelector(`input[data-row="29"][data-col="${dayCols[i]}"]`);
-    if (!milesInp || !outInp) continue;
-    const n = Number((milesInp.value || '').trim());
-    if (!Number.isFinite(n) || n<=0){
-      outInp.value = '';
-    } else {
-      outInp.value = (n * MILEAGE_RATE).toFixed(2);
-    }
-  }
+  setStatus('Cleared (not deleted).');
 }
 
 function computeTotals(){
@@ -309,8 +291,7 @@ function serialize(){
 }
 
 function applyData(data){
-  // Clear entry fields but keep current Sync selection
-  clearInputs({ resetSync:false, resetWeekSelect:false, resetDates:false, resetBusinessPurpose:false, silent:true });
+  clearInputs({ resetSync: false, resetWeekSelect: false, resetDates: false });
   if (!data) return;
   el('businessPurpose').value = data.businessPurpose || '';
   const map = data.entries || {};
@@ -629,6 +610,15 @@ function setWeekFromSunday(sundayISO){
 el('sundayDate').addEventListener('change', ()=>{
   const v = el('sundayDate').value;
   if (!v) return;
+
+  const newWE = toISODate(computeWeekEndingFromSunday(v));
+  const changed = !!(currentWeekEnding && newWE && newWE !== currentWeekEnding);
+
+  // If user picks a new Sunday/week, start a fresh entry automatically.
+  if (changed){
+    clearInputs({ resetSync: true, resetWeekSelect: true, resetDates: false });
+  }
+
   setWeekFromSunday(v);
   setButtonsEnabled();
 });
