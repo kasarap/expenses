@@ -2,129 +2,117 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Travel Expense Report</title>
-  <link rel="stylesheet" href="styles.css" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Weekly Expenses</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.19.3/dist/xlsx.full.min.js"></script>
 </head>
 <body>
-  <header class="wrap">
-    <h1>Travel Expense Report</h1>
-    <p class="muted">Enter your daily values, then download a filled-in Excel file using your provided template.</p>
+  <header class="bar">
+    <div class="bar-left">
+      <div class="title">Weekly Expenses</div>
+      <div class="sub">Cloud-backed (KV) • Sync by Week Ending (Saturday)</div>
+    </div>
+    <div class="bar-right">
+      <button id="btnDownload" class="primary" disabled>Download filled Excel</button>
+    </div>
   </header>
 
   <main class="wrap">
     <section class="card">
-      <h2>Header</h2>
-      <div class="grid">
-        <label>
-          Name
-          <input id="name" type="text" autocomplete="name" placeholder="Jonathan Mercado" />
+      <h2>Login</h2>
+      <div class="grid3">
+        <label>Username
+          <input id="username" autocomplete="username" placeholder="Username">
         </label>
-        <label>
-          Week ending (MM/DD/YY or MM/DD/YYYY)
-          <input id="weekEnding" type="text" inputmode="numeric" placeholder="02/21/2026" />
+        <label>Password
+          <input id="password" type="password" autocomplete="current-password" placeholder="Password">
         </label>
-        <label class="full">
-          Business purpose of expenses
-          <input id="purpose" type="text" placeholder="Site visit / customer meeting / training" />
-        </label>
+        <div class="row-end">
+          <button id="btnLogin" class="primary">Login</button>
+          <button id="btnLogout" class="ghost" disabled>Logout</button>
+        </div>
       </div>
-      <div class="row">
-        <button id="clearAll" class="secondary" type="button">Clear all</button>
-        <span class="muted small" id="status"></span>
+      <div class="hint">
+        Uses the same credentials as your other KV-backed pages app (set in Cloudflare env vars).
       </div>
+      <div id="loginStatus" class="status"></div>
     </section>
 
     <section class="card">
-      <h2>Daily details</h2>
-      <div class="table-scroll">
-        <table id="dailyTable">
-          <thead>
-            <tr>
-              <th>Field</th>
-              <th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Date</td>
-              <td><input data-cell="date-0" placeholder="MM/DD" /></td>
-              <td><input data-cell="date-1" placeholder="MM/DD" /></td>
-              <td><input data-cell="date-2" placeholder="MM/DD" /></td>
-              <td><input data-cell="date-3" placeholder="MM/DD" /></td>
-              <td><input data-cell="date-4" placeholder="MM/DD" /></td>
-              <td><input data-cell="date-5" placeholder="MM/DD" /></td>
-              <td><input data-cell="date-6" placeholder="MM/DD" /></td>
-            </tr>
-            <tr>
-              <td>From</td>
-              <td><input data-cell="from-0" placeholder="City" /></td>
-              <td><input data-cell="from-1" placeholder="City" /></td>
-              <td><input data-cell="from-2" placeholder="City" /></td>
-              <td><input data-cell="from-3" placeholder="City" /></td>
-              <td><input data-cell="from-4" placeholder="City" /></td>
-              <td><input data-cell="from-5" placeholder="City" /></td>
-              <td><input data-cell="from-6" placeholder="City" /></td>
-            </tr>
-            <tr>
-              <td>To</td>
-              <td><input data-cell="to-0" placeholder="City" /></td>
-              <td><input data-cell="to-1" placeholder="City" /></td>
-              <td><input data-cell="to-2" placeholder="City" /></td>
-              <td><input data-cell="to-3" placeholder="City" /></td>
-              <td><input data-cell="to-4" placeholder="City" /></td>
-              <td><input data-cell="to-5" placeholder="City" /></td>
-              <td><input data-cell="to-6" placeholder="City" /></td>
-            </tr>
-            <tr>
-              <td>Business miles driven</td>
-              <td><input data-cell="miles-0" inputmode="decimal" placeholder="0" /></td>
-              <td><input data-cell="miles-1" inputmode="decimal" placeholder="0" /></td>
-              <td><input data-cell="miles-2" inputmode="decimal" placeholder="0" /></td>
-              <td><input data-cell="miles-3" inputmode="decimal" placeholder="0" /></td>
-              <td><input data-cell="miles-4" inputmode="decimal" placeholder="0" /></td>
-              <td><input data-cell="miles-5" inputmode="decimal" placeholder="0" /></td>
-              <td><input data-cell="miles-6" inputmode="decimal" placeholder="0" /></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="card">
-      <h2>Expenses (enter amounts)</h2>
-      <p class="muted small">Tip: leave blank for zero. You can paste values.</p>
-
-      <div class="table-scroll">
-        <table id="expenseTable">
-          <thead>
-            <tr>
-              <th>Category</th>
-              <th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th>
-            </tr>
-          </thead>
-          <tbody id="expenseBody"></tbody>
-        </table>
+      <h2>Week</h2>
+      <div class="grid3">
+        <label>Pick a saved week
+          <select id="weekSelect" disabled>
+            <option value="">(Select a week)</option>
+          </select>
+        </label>
+        <label>Sunday date (you enter)
+          <input id="sundayDate" type="date" disabled>
+        </label>
+        <label>Week Ending (Saturday) — Sync Name
+          <input id="weekEnding" type="date" disabled>
+        </label>
       </div>
 
       <div class="row">
-        <button id="download" type="button">Download filled Excel</button>
-        <a id="downloadLink" class="hidden" download>download</a>
+        <button id="btnDeleteWeek" class="danger" disabled>Delete selected week</button>
+      </div>
+
+      <div class="grid2">
+        <label>Business Purpose of Expenses
+          <input id="businessPurpose" placeholder="e.g., Angelton Flights">
+        </label>
+        <label>D55 (Employee signature date or notes)
+          <input id="cellD55" placeholder="">
+        </label>
+      </div>
+
+      <div class="row">
+        <button id="btnLoad" class="primary" disabled>Load week</button>
+        <button id="btnSave" class="ghost" disabled>Save now</button>
+        <button id="btnClear" class="danger" disabled>Clear inputs (does not delete cloud)</button>
+        <span id="saveStatus" class="status"></span>
+      </div>
+
+      <div class="hint">
+        Your <b>Sync Name</b> is the Week Ending (Saturday) date. Enter only the <b>Sunday</b> date; the week and Excel date row are filled automatically.
       </div>
     </section>
 
     <section class="card">
-      <h2>How it works</h2>
-      <ul class="muted">
-        <li>The app loads <code>Expenses Form.xlsx</code> as a template.</li>
-        <li>Your inputs are written into the correct cells; formulas remain intact.</li>
-        <li>The browser generates a new <code>.xlsx</code> for download (nothing is uploaded anywhere).</li>
-      </ul>
+      <h2>Daily entries</h2>
+      <div class="tablewrap">
+        <table id="entryTable">
+          <thead>
+            <tr>
+              <th class="sticky">Row</th>
+              <th class="sticky2">Label</th>
+              <th>SUN</th><th>MON</th><th>TUE</th><th>WED</th><th>THU</th><th>FRI</th><th>SAT</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="totals">
+        <div class="totals-row">
+          <div class="totals-label">Day totals</div>
+          <div class="totals-days">
+            <input id="totSUN" readonly><input id="totMON" readonly><input id="totTUE" readonly><input id="totWED" readonly><input id="totTHU" readonly><input id="totFRI" readonly><input id="totSAT" readonly>
+          </div>
+          <div class="totals-week">
+            <div class="totals-week-label">Week total</div>
+            <input id="totWEEK" readonly>
+          </div>
+        </div>
+      </div>
+      <div class="hint">
+        Included rows: 8–10, 18–23, 25–26, 34, 36, 38, 39, 42–44 (columns C–I).
+      </div>
     </section>
   </main>
 
-  <!-- SheetJS -->
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="script.js"></script>
 </body>
 </html>

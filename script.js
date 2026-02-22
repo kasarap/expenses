@@ -1,304 +1,437 @@
-// Travel Expense Report - template filler
-const TEMPLATE_PATH = "Expenses Form.xlsx";
-const LS_KEY = "expense_form_draft_v1";
+// Weekly Expenses KV-backed app
+const API = {
+  login: '/api/login',
+  data: '/api/data',
+  weeks: '/api/weeks',
+};
 
-const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
-const COLS = ["C","D","E","F","G","H","I"]; // in the Excel template
+const el = (id) => document.getElementById(id);
+const days = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+const dayCols = ['C','D','E','F','G','H','I']; // Excel cols for Sun..Sat
 
-// Map web categories to Excel rows (based on your uploaded template)
-const CATEGORY_ROWS = [
-  { group: "Company Paid", items: [
-    { key: "airfare_company_paid", label: "Airfare Company Paid", row: 12 },
-    { key: "auto_rental_company_paid", label: "Auto Rental Company Paid", row: 13 },
-    { key: "lodging_company_paid", label: "Lodging Company Paid", row: 14 },
-    { key: "gas_company_paid", label: "Gas Company Paid", row: 15 },
-    { key: "other_company_paid", label: "**Other Company Paid", row: 16 },
-  ]},
-  { group: "Travel", items: [
-    { key: "airfare", label: "Airfare", row: 18 },
-    { key: "bus_limo_taxi", label: "Bus, Limo & Taxi", row: 19 },
-    { key: "lodging_room_tax", label: "Lodging Room & Tax", row: 20 },
-    { key: "parking_tolls", label: "Parking / Tolls", row: 21 },
-    { key: "tips", label: "Tips", row: 22 },
-    { key: "laundry", label: "Laundry", row: 23 },
-  ]},
-  { group: "Auto", items: [
-    { key: "auto_rental", label: "Auto Rental", row: 25 },
-    { key: "auto_rental_fuel", label: "Auto Rental Fuel", row: 26 },
-    { key: "company_car_fuel", label: "Company Car Fuel", row: 27 },
-    { key: "company_car_maintenance", label: "Company Car Maintenance", row: 28 },
-    // Personal car mileage is formula-driven in row 29 based on miles in row 10 and rate in B10
-  ]},
-  { group: "Telephone", items: [
-    { key: "lodging_phone_fax", label: "Loding Phone / Fax", row: 31 },
-    { key: "home_phone_fax", label: "Home Phone / Fax", row: 32 },
-    { key: "cell_phone", label: "Cell Phone", row: 33 },
-    { key: "internet_email", label: "Internet - Email", row: 34 },
-  ]},
-  { group: "Other", items: [
-    { key: "postage", label: "POSTAGE", row: 36 },
-    { key: "office_supplies", label: "OFFICE SUPPLIES", row: 37 },
-    { key: "perishable_tools", label: "PERISHABLE TOOLS", row: 38 },
-    { key: "dues_subscriptions", label: "DUES & SUBSCRIPTIONS", row: 39 },
-    { key: "other_misc", label: "**Other", row: 40 },
-  ]},
-  { group: "Meals", items: [
-    { key: "breakfast", label: "Breakfast", row: 42 },
-    { key: "lunch", label: "Lunch", row: 43 },
-    { key: "dinner", label: "Dinner", row: 44 },
-  ]},
-  { group: "Entertainment", items: [
-    { key: "ent_breakfast", label: "**Entertainment - Breakfast", row: 46 },
-    { key: "ent_lunch", label: "**Entertainment - Lunch", row: 47 },
-    { key: "ent_dinner", label: "**Entertainment - Dinner", row: 48 },
-    { key: "ent_other", label: "**Entertainment - Other", row: 49 },
-  ]},
+// Rows requested by user
+const rows = [
+  {row:8, label:'FROM', type:'text'},
+  {row:9, label:'TO', type:'text'},
+  {row:10, label:'BUSINESS MILES DRIVEN', type:'number'},
+  {row:18, label:'Airfare', type:'number'},
+  {row:19, label:'Bus, Limo & Taxi', type:'number'},
+  {row:20, label:'Lodging Room & Tax', type:'number'},
+  {row:21, label:'Parking / Tolls', type:'number'},
+  {row:22, label:'Tips', type:'number'},
+  {row:23, label:'Laundry', type:'number'},
+  {row:25, label:'Auto Rental', type:'number'},
+  {row:26, label:'Auto Rental Fuel', type:'number'},
+  {row:34, label:'Internet - Email', type:'number'},
+  {row:36, label:'POSTAGE', type:'number'},
+  {row:38, label:'PERISHABLE TOOLS', type:'number'},
+  {row:39, label:'DUES & SUBSCRIPTIONS', type:'number'},
+  {row:42, label:'Breakfast', type:'number'},
+  {row:43, label:'Lunch', type:'number'},
+  {row:44, label:'Dinner', type:'number'},
 ];
 
-function el(id){ return document.getElementById(id); }
-function q(sel){ return document.querySelector(sel); }
-function qa(sel){ return Array.from(document.querySelectorAll(sel)); }
+// State
+let token = localStorage.getItem('expenses_token') || '';
+let currentWeekEnding = '';
+let autosaveTimer = null;
 
-function setStatus(msg){
-  const s = el("status");
-  s.textContent = msg || "";
+function setStatus(msg, kind='') {
+  const s = el('saveStatus');
+  s.textContent = msg || '';
+  s.dataset.kind = kind;
 }
 
-function moneyToNumber(v){
-  if(v === null || v === undefined) return null;
-  const t = String(v).trim();
-  if(!t) return null;
-  // allow commas and $ and spaces
-  const cleaned = t.replace(/[$,]/g,"").trim();
-  const num = Number(cleaned);
-  return Number.isFinite(num) ? num : null;
+function setLoginStatus(msg) {
+  el('loginStatus').textContent = msg || '';
 }
 
-function buildExpenseTable(){
-  const tbody = el("expenseBody");
-  tbody.innerHTML = "";
-  for(const group of CATEGORY_ROWS){
-    // group row
-    const trG = document.createElement("tr");
-    trG.className = "group";
-    const td0 = document.createElement("td");
-    td0.textContent = group.group;
-    td0.style.color = "#a7adbb";
-    td0.style.fontWeight = "700";
-    td0.colSpan = 8;
-    trG.appendChild(td0);
-    tbody.appendChild(trG);
+function enableAuthedUI(isAuthed) {
+  el('btnLogout').disabled = !isAuthed;
+  el('btnLogin').disabled = isAuthed;
+  el('btnLoad').disabled = !isAuthed;
+  el('btnSave').disabled = !isAuthed;
+  el('btnClear').disabled = !isAuthed;
+  el('btnDownload').disabled = !isAuthed;
+  el('weekSelect').disabled = !isAuthed;
+  el('sundayDate').disabled = !isAuthed;
+  el('btnDeleteWeek').disabled = !isAuthed;
+}
 
-    for(const item of group.items){
-      const tr = document.createElement("tr");
-      const tdLabel = document.createElement("td");
-      tdLabel.textContent = item.label;
-      tr.appendChild(tdLabel);
+function toISODate(d) {
+  // local date -> YYYY-MM-DD
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const da = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${da}`;
+}
 
-      for(let d=0; d<7; d++){
-        const td = document.createElement("td");
-        const inp = document.createElement("input");
-        inp.setAttribute("inputmode","decimal");
-        inp.placeholder = "0.00";
-        inp.dataset.key = item.key;
-        inp.dataset.day = String(d);
-        inp.addEventListener("input", saveDraftDebounced);
-        td.appendChild(inp);
-        tr.appendChild(td);
-      }
-      tbody.appendChild(tr);
+function parseISODate(s) {
+  // YYYY-MM-DD (local)
+  const [y,m,d] = s.split('-').map(Number);
+  return new Date(y, m-1, d);
+}
+
+function computeWeekEnding(anyDate) {
+  // Round forward to Saturday of that week
+  const d = parseISODate(anyDate);
+  const dow = d.getDay(); // Sun=0 .. Sat=6
+  const add = (6 - dow + 7) % 7; // 0 if already Sat, else days until next Sat
+  d.setDate(d.getDate() + add);
+  return d;
+}
+
+function computeSunday(weekEndingDate) {
+  const d = new Date(weekEndingDate);
+  d.setDate(d.getDate() - 6);
+  return d;
+}
+
+function fmtMD(dateObj) {
+  const m = dateObj.getMonth()+1;
+  const d = dateObj.getDate();
+  return `${m}-${d}`;
+}
+
+function buildTable() {
+  const tbody = el('entryTable').querySelector('tbody');
+  tbody.innerHTML = '';
+  rows.forEach(r => {
+    const tr = document.createElement('tr');
+    const tdRow = document.createElement('td'); tdRow.className='sticky'; tdRow.textContent = r.row;
+    const tdLabel = document.createElement('td'); tdLabel.className='sticky2'; tdLabel.textContent = r.label;
+    tr.appendChild(tdRow); tr.appendChild(tdLabel);
+    for (let i=0;i<7;i++){
+      const td = document.createElement('td');
+      const inp = document.createElement('input');
+      inp.dataset.row = String(r.row);
+      inp.dataset.col = dayCols[i];
+      inp.dataset.type = r.type;
+      inp.inputMode = (r.type === 'number') ? 'decimal' : 'text';
+      inp.placeholder = (r.type === 'number') ? '0' : '';
+      inp.addEventListener('input', () => scheduleAutosave());
+      inp.addEventListener('input', () => computeTotals());
+      td.appendChild(inp);
+      tr.appendChild(td);
     }
-  }
-}
-
-function getDraft(){
-  const obj = {
-    name: el("name").value || "",
-    weekEnding: el("weekEnding").value || "",
-    purpose: el("purpose").value || "",
-    daily: {
-      date: Array(7).fill(""),
-      from: Array(7).fill(""),
-      to: Array(7).fill(""),
-      miles: Array(7).fill(""),
-    },
-    expenses: {} // key -> [7 strings]
-  };
-
-  // daily details
-  for(const kind of ["date","from","to","miles"]){
-    for(let d=0; d<7; d++){
-      const inp = document.querySelector(`[data-cell="${kind}-${d}"]`);
-      obj.daily[kind][d] = inp ? (inp.value || "") : "";
-    }
-  }
-
-  // expenses
-  for(const group of CATEGORY_ROWS){
-    for(const item of group.items){
-      const arr = Array(7).fill("");
-      for(let d=0; d<7; d++){
-        const inp = document.querySelector(`input[data-key="${item.key}"][data-day="${d}"]`);
-        arr[d] = inp ? (inp.value || "") : "";
-      }
-      obj.expenses[item.key] = arr;
-    }
-  }
-  return obj;
-}
-
-function applyDraft(obj){
-  el("name").value = obj?.name ?? "";
-  el("weekEnding").value = obj?.weekEnding ?? "";
-  el("purpose").value = obj?.purpose ?? "";
-
-  // daily
-  for(const kind of ["date","from","to","miles"]){
-    for(let d=0; d<7; d++){
-      const inp = document.querySelector(`[data-cell="${kind}-${d}"]`);
-      if(inp) inp.value = obj?.daily?.[kind]?.[d] ?? "";
-    }
-  }
-
-  // expenses
-  for(const group of CATEGORY_ROWS){
-    for(const item of group.items){
-      for(let d=0; d<7; d++){
-        const inp = document.querySelector(`input[data-key="${item.key}"][data-day="${d}"]`);
-        if(inp) inp.value = obj?.expenses?.[item.key]?.[d] ?? "";
-      }
-    }
-  }
-}
-
-let saveTimer = null;
-function saveDraftDebounced(){
-  if(saveTimer) window.clearTimeout(saveTimer);
-  saveTimer = window.setTimeout(() => {
-    try{
-      const draft = getDraft();
-      localStorage.setItem(LS_KEY, JSON.stringify(draft));
-      setStatus("Saved locally.");
-      window.setTimeout(()=>setStatus(""), 1200);
-    }catch(e){
-      console.warn(e);
-    }
-  }, 250);
-}
-
-function clearAll(){
-  if(!confirm("Clear all fields?")) return;
-  localStorage.removeItem(LS_KEY);
-  applyDraft({});
-  setStatus("Cleared.");
-  window.setTimeout(()=>setStatus(""), 1200);
-}
-
-// Write to a sheet cell safely
-function setCell(ws, addr, value){
-  // Keep formulas intact by only writing numeric/string values
-  if(value === null || value === undefined || value === "") return;
-  ws[addr] = ws[addr] || {};
-  ws[addr].v = value;
-  // basic types
-  if(typeof value === "number"){
-    ws[addr].t = "n";
-  }else{
-    ws[addr].t = "s";
-  }
-}
-
-async function generateExcel(){
-  setStatus("Generating…");
-
-  // Load template
-  const res = await fetch(TEMPLATE_PATH, { cache: "no-store" });
-  if(!res.ok) throw new Error("Template not found. Make sure 'Expenses Form.xlsx' is deployed with the site.");
-  const buf = await res.arrayBuffer();
-
-  const wb = XLSX.read(buf, { type: "array", cellStyles: true });
-  const ws = wb.Sheets["Page 1"];
-  if(!ws) throw new Error("Sheet 'Page 1' not found in template.");
-
-  const draft = getDraft();
-
-  // Header fields
-  if(draft.name) setCell(ws, "A5", draft.name);
-
-  if(draft.weekEnding){
-    // D4:E4 is merged in the template; store in D4
-    setCell(ws, "D4", `Week Ending: ${draft.weekEnding}`);
-  }
-  if(draft.purpose){
-    // F4:J4 is merged in the template; store in F4
-    setCell(ws, "F4", `Business Purpose of Expenses: ${draft.purpose}`);
-  }
-
-  // Daily (rows 7-10) across C-I
-  for(let d=0; d<7; d++){
-    setCell(ws, `${COLS[d]}7`, draft.daily.date[d] || "");
-    setCell(ws, `${COLS[d]}8`, draft.daily.from[d] || "");
-    setCell(ws, `${COLS[d]}9`, draft.daily.to[d] || "");
-
-    const milesNum = moneyToNumber(draft.daily.miles[d]);
-    if(milesNum !== null) setCell(ws, `${COLS[d]}10`, milesNum);
-  }
-
-  // Expenses
-  for(const group of CATEGORY_ROWS){
-    for(const item of group.items){
-      const arr = draft.expenses[item.key] || [];
-      for(let d=0; d<7; d++){
-        const num = moneyToNumber(arr[d]);
-        if(num !== null) setCell(ws, `${COLS[d]}${item.row}`, num);
-      }
-    }
-  }
-
-  // Output
-  const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-  const blob = new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-
-  const fileNameSafeWeek = (draft.weekEnding || "week").replace(/[^\w\-]+/g, "_");
-  const fileNameSafeName = (draft.name || "employee").replace(/[^\w\-]+/g, "_");
-  const fileName = `Travel_Expense_${fileNameSafeName}_${fileNameSafeWeek}.xlsx`;
-
-  const url = URL.createObjectURL(blob);
-  const a = el("downloadLink");
-  a.href = url;
-  a.download = fileName;
-  a.classList.remove("hidden");
-  a.click();
-
-  // cleanup url later
-  setTimeout(()=>URL.revokeObjectURL(url), 30_000);
-
-  setStatus("Downloaded.");
-  window.setTimeout(()=>setStatus(""), 1500);
-}
-
-function init(){
-  buildExpenseTable();
-
-  // Restore draft if present
-  const raw = localStorage.getItem(LS_KEY);
-  if(raw){
-    try{ applyDraft(JSON.parse(raw)); }catch(e){ /* ignore */ }
-  }
-
-  // Wire up auto-save for header + daily table
-  ["name","weekEnding","purpose"].forEach(id => el(id).addEventListener("input", saveDraftDebounced));
-  qa("#dailyTable input").forEach(inp => inp.addEventListener("input", saveDraftDebounced));
-
-  el("clearAll").addEventListener("click", clearAll);
-  el("download").addEventListener("click", async () => {
-    try{ await generateExcel(); }
-    catch(e){
-      console.error(e);
-      alert(e.message || String(e));
-      setStatus("");
-    }
+    tbody.appendChild(tr);
   });
 }
 
-document.addEventListener("DOMContentLoaded", init);
+function getAllInputs() {
+  return Array.from(el('entryTable').querySelectorAll('input'));
+}
+
+function clearInputs() {
+  getAllInputs().forEach(i => i.value = '');
+  el('businessPurpose').value = '';
+  el('cellD55').value = '';
+  computeTotals();
+}
+
+function serializeData() {
+  const entries = {};
+  getAllInputs().forEach(inp => {
+    const addr = `${inp.dataset.col}${inp.dataset.row}`;
+    const raw = inp.value;
+    if (raw === '') return;
+    if (inp.dataset.type === 'number') {
+      const n = Number(raw);
+      if (!Number.isFinite(n)) return;
+      entries[addr] = n;
+    } else {
+      entries[addr] = raw;
+    }
+  });
+  const d55 = el('cellD55').value;
+  if (d55 !== '') entries['D55'] = d55;
+  return {
+    weekEnding: currentWeekEnding,
+    businessPurpose: el('businessPurpose').value || '',
+    entries
+  };
+}
+
+function applyData(data) {
+  clearInputs();
+  if (!data) return;
+  if (data.businessPurpose) el('businessPurpose').value = data.businessPurpose;
+  if (data.entries && data.entries['D55'] != null) el('cellD55').value = String(data.entries['D55']);
+  const map = data.entries || {};
+  getAllInputs().forEach(inp => {
+    const addr = `${inp.dataset.col}${inp.dataset.row}`;
+    if (map[addr] == null) return;
+    inp.value = String(map[addr]);
+  });
+  computeTotals();
+}
+
+function computeTotals() {
+  // Totals include numeric rows only (exclude text rows 8–9 and any text fields)
+  const totals = [0,0,0,0,0,0,0];
+  getAllInputs().forEach(inp => {
+    if (inp.dataset.type !== 'number') return;
+    const v = inp.value.trim();
+    if (!v) return;
+    const n = Number(v);
+    if (!Number.isFinite(n)) return;
+    const idx = dayCols.indexOf(inp.dataset.col);
+    if (idx >= 0) totals[idx] += n;
+  });
+  const ids = ['totSUN','totMON','totTUE','totWED','totTHU','totFRI','totSAT'];
+  let week = 0;
+  totals.forEach((t,i)=>{
+    week += t;
+    el(ids[i]).value = t ? t.toFixed(2).replace(/\.00$/,'') : '';
+  });
+  el('totWEEK').value = week ? week.toFixed(2).replace(/\.00$/,'') : '';
+}
+
+async function apiFetch(url, opts={}) {
+  const headers = opts.headers ? {...opts.headers} : {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+  const res = await fetch(url, {...opts, headers});
+  if (!res.ok) {
+    const txt = await res.text().catch(()=> '');
+    throw new Error(`${res.status} ${res.statusText}${txt ? ' - ' + txt : ''}`);
+  }
+  return res;
+}
+
+async function login() {
+  const username = el('username').value.trim();
+  const password = el('password').value;
+  setLoginStatus('');
+  setStatus('');
+  try {
+    const res = await fetch(API.login, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({username, password})
+    });
+    if (!res.ok) throw new Error('Login failed');
+    const out = await res.json();
+    token = out.token;
+    localStorage.setItem('expenses_token', token);
+    setLoginStatus('Logged in.');
+    enableAuthedUI(true);
+    await refreshWeeks();
+    // Keep current selection, but ensure dropdown is populated
+  } catch (e) {
+    token = '';
+    localStorage.removeItem('expenses_token');
+    enableAuthedUI(false);
+    setLoginStatus('Login failed. Check username/password and Cloudflare env vars.');
+  }
+}
+
+function logout() {
+  token = '';
+  localStorage.removeItem('expenses_token');
+  enableAuthedUI(false);
+  setLoginStatus('Logged out.');
+}
+
+async function loadWeek() {
+  if (!currentWeekEnding) return;
+  setStatus('Loading…');
+  try {
+    const res = await apiFetch(`${API.data}?weekEnding=${encodeURIComponent(currentWeekEnding)}`);
+    const out = await res.json();
+    applyData(out);
+    setStatus('Loaded.');
+  } catch (e) {
+    // If not found, treat as blank
+    clearInputs();
+    setStatus('No saved data yet (starting fresh).');
+  }
+}
+
+async function refreshWeeks() {
+  try {
+    const res = await apiFetch(API.weeks);
+    const out = await res.json();
+    const weeks = Array.isArray(out.weeks) ? out.weeks : [];
+    populateWeekSelect(weeks);
+  } catch {
+    populateWeekSelect([]);
+  }
+}
+
+function populateWeekSelect(weeks) {
+  const sel = el('weekSelect');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">(Select a week)</option>';
+  const unique = Array.from(new Set(weeks)).sort();
+  unique.forEach(we => {
+    const opt = document.createElement('option');
+    opt.value = we;
+    opt.textContent = labelForWeek(we);
+    sel.appendChild(opt);
+  });
+  if (current && unique.includes(current)) sel.value = current;
+  else if (currentWeekEnding && unique.includes(currentWeekEnding)) sel.value = currentWeekEnding;
+}
+
+function ensureWeekOption(weekEnding) {
+  const sel = el('weekSelect');
+  const exists = Array.from(sel.options).some(o => o.value === weekEnding);
+  if (exists) return;
+  const opt = document.createElement('option');
+  opt.value = weekEnding;
+  opt.textContent = labelForWeek(weekEnding);
+  sel.appendChild(opt);
+}
+
+function labelForWeek(weekEnding) {
+  const sat = parseISODate(weekEnding);
+  const sun = computeSunday(sat);
+  return `Week ${fmtMD(sun)} through ${fmtMD(sat)}`;
+}
+
+async function saveWeek() {
+  if (!currentWeekEnding) return;
+  const payload = serializeData();
+  setStatus('Saving…');
+  try {
+    await apiFetch(API.data, {method:'PUT', body: JSON.stringify(payload)});
+    setStatus('Saved.');
+    await refreshWeeks();
+    ensureWeekOption(currentWeekEnding);
+    el('weekSelect').value = currentWeekEnding;
+  } catch (e) {
+    setStatus('Save failed (check login / KV binding).');
+  }
+}
+
+async function deleteWeek() {
+  if (!currentWeekEnding) return;
+  if (!confirm(`Delete saved data for week ending ${currentWeekEnding}? This cannot be undone.`)) return;
+  setStatus('Deleting…');
+  try {
+    await apiFetch(`${API.data}?weekEnding=${encodeURIComponent(currentWeekEnding)}`, { method:'DELETE' });
+    clearInputs();
+    setStatus('Deleted.');
+    await refreshWeeks();
+    el('weekSelect').value = '';
+  } catch {
+    setStatus('Delete failed.');
+  }
+}
+
+function scheduleAutosave() {
+  if (!token) return;
+  if (!currentWeekEnding) return;
+  setStatus('Editing…');
+  if (autosaveTimer) clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(() => saveWeek(), 700);
+}
+
+async function downloadExcel() {
+  if (!currentWeekEnding) return;
+  setStatus('Building Excel…');
+  try {
+    const templateRes = await fetch('Expenses Form.xlsx', {cache:'no-store'});
+    const buf = await templateRes.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array'});
+    const ws = wb.Sheets['Page 1'] || wb.Sheets[wb.SheetNames[0]];
+
+    // Set Week Ending (E4) and Business Purpose (G4)
+    ws['E4'] = {t:'s', v: currentWeekEnding};
+    const bp = el('businessPurpose').value || '';
+    ws['G4'] = {t:'s', v: bp};
+
+    // Set date row (C7..I7)
+    const sat = parseISODate(currentWeekEnding);
+    const sun = computeSunday(sat);
+    for (let i=0;i<7;i++){
+      const d = new Date(sun);
+      d.setDate(sun.getDate() + i);
+      const addr = `${dayCols[i]}7`;
+      // Write as string date like M/D/YYYY (keeps template consistent)
+      const s = `${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`;
+      ws[addr] = {t:'s', v:s};
+    }
+
+    // Write entries
+    const payload = serializeData();
+    for (const [addr, val] of Object.entries(payload.entries || {})) {
+      if (typeof val === 'number') ws[addr] = {t:'n', v: val};
+      else ws[addr] = {t:'s', v: String(val)};
+    }
+
+    // Export filename: Week m-d through m-d - (business purpose).xlsx
+    const mdSun = fmtMD(sun);
+    const mdSat = fmtMD(sat);
+    const safeBp = (bp || 'Expenses').replace(/[\\/:*?"<>|]+/g,'').trim();
+    const fname = `Week ${mdSun} through ${mdSat} - ${safeBp}.xlsx`;
+    XLSX.writeFile(wb, fname);
+    setStatus('Excel downloaded.');
+  } catch (e) {
+    setStatus('Excel export failed. (Template missing or blocked by browser?)');
+  }
+}
+
+// UI wiring
+buildTable();
+
+el('btnLogin').addEventListener('click', login);
+el('btnLogout').addEventListener('click', logout);
+el('btnLoad').addEventListener('click', loadWeek);
+el('btnSave').addEventListener('click', saveWeek);
+el('btnClear').addEventListener('click', () => { clearInputs(); setStatus('Cleared (not deleted).'); scheduleAutosave(); });
+el('btnDownload').addEventListener('click', downloadExcel);
+el('btnDeleteWeek').addEventListener('click', deleteWeek);
+
+el('weekSelect').addEventListener('change', () => {
+  const we = el('weekSelect').value;
+  if (!we) return;
+  currentWeekEnding = we;
+  el('weekEnding').value = currentWeekEnding;
+  const sun = computeSunday(parseISODate(currentWeekEnding));
+  el('sundayDate').value = toISODate(sun);
+  if (token) loadWeek();
+});
+
+el('sundayDate').addEventListener('change', () => {
+  const v = el('sundayDate').value;
+  if (!v) return;
+  const sun = parseISODate(v);
+  const sat = new Date(sun);
+  sat.setDate(sun.getDate() + 6);
+  currentWeekEnding = toISODate(sat);
+  el('weekEnding').value = currentWeekEnding;
+  ensureWeekOption(currentWeekEnding);
+  el('weekSelect').value = currentWeekEnding;
+  if (token) loadWeek();
+});
+
+el('businessPurpose').addEventListener('input', () => scheduleAutosave());
+el('cellD55').addEventListener('input', () => scheduleAutosave());
+
+// On load: set default anyDate = today
+(function init(){
+  const today = new Date();
+  // Default Sunday = Sunday of the current week (local)
+  const sun = new Date(today);
+  sun.setDate(today.getDate() - today.getDay());
+  el('sundayDate').value = toISODate(sun);
+  const sat = new Date(sun);
+  sat.setDate(sun.getDate() + 6);
+  currentWeekEnding = toISODate(sat);
+  el('weekEnding').value = currentWeekEnding;
+  computeTotals();
+
+  if (token) {
+    enableAuthedUI(true);
+    setLoginStatus('Logged in (saved session).');
+    refreshWeeks().then(() => {
+      ensureWeekOption(currentWeekEnding);
+      el('weekSelect').value = currentWeekEnding;
+      loadWeek();
+    });
+  } else {
+    enableAuthedUI(false);
+  }
+})();

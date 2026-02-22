@@ -1,30 +1,38 @@
-Travel Expense Report Web App (Template Filler)
+Weekly Expenses (Cloudflare Pages + KV)
 
 What this does
-- Loads the included Excel template: "Expenses Form.xlsx"
-- You enter values in the webpage during the week
-- Click "Download filled Excel" to generate a completed .xlsx with formulas preserved
+- Web page to enter weekly expenses during the week
+- Sync key (Sync Name) is automatically the Week Ending (Saturday) date
+- Saves/loads data from Cloudflare KV (so you can open anytime)
+- Exports a filled Excel using your template "Expenses Form.xlsx"
+  - E4 = Week Ending (YYYY-MM-DD)
+  - G4 = Business Purpose of Expenses
+  - C7..I7 = Sunday..Saturday date strings (M/D/YYYY)
+  - Writes your selected rows into columns C..I
+  - Writes D55 from the single input
 
-Files
-- index.html
-- styles.css
-- script.js
-- Expenses Form.xlsx  (your template)
+Deploy steps (Cloudflare Pages)
+1) Create a GitHub repo and push the folder contents.
+2) Cloudflare Dashboard → Pages → Create a project → Connect to Git → select the repo.
+3) Framework preset: None
+   Build command: (leave blank)
+   Build output directory: / (root)
+4) Create KV namespace:
+   Cloudflare Dashboard → Workers & Pages → KV → Create namespace (name it e.g. EXPENSES)
+5) Bind KV to Pages Functions:
+   Pages → your project → Settings → Functions → KV bindings
+   - Variable name: EXPENSES_KV
+   - KV namespace: (select the one you created)
 
-Deploy on Cloudflare Pages (no build step)
-1) Create a new GitHub repo (example: expense-report-web)
-2) Upload these files to the repo root:
-   - index.html
-   - styles.css
-   - script.js
-   - Expenses Form.xlsx
-3) Cloudflare Dashboard → Workers & Pages → Pages → Create a project → Connect to Git
-4) Pick the repo
-5) Framework preset: None
-6) Build command: (leave blank)
-7) Build output directory: /  (or leave blank; Cloudflare will serve the repo root)
-8) Deploy
+6) Add environment variables (Pages → Settings → Environment variables):
+   - APP_USER = (same username as your other site)
+   - APP_PASS = (same password as your other site)
+   - TOKEN_SECRET = (any long random string)
+
+7) Deploy. Open the site, login, pick a date, and start entering values.
 
 Notes
-- Draft auto-saves locally in your browser (localStorage). Nothing is uploaded.
-- If you ever change the Excel template layout, the row mappings in script.js may need updates.
+- Data is stored under keys like: expenses:YYYY-MM-DD (Saturday date)
+- "Clear inputs" only clears the on-screen form (it does not delete KV).
+- You can re-load the week anytime using the date picker.
+
