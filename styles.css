@@ -82,3 +82,10 @@ input.computed{opacity:.85}
 .dialogForm{padding:14px;display:flex;flex-direction:column;gap:10px}
 .dialogForm h3{margin:0;font-size:16px}
 .dialogBtns{display:flex;gap:10px;justify-content:flex-end}
+
+
+/* Header dates above weekday */
+#entryTable thead th { vertical-align: bottom; }
+#entryTable thead th:not(.stickyLabel){ padding-top: 10px; padding-bottom: 10px; }
+#entryTable thead th .th-date{ font-size: 12px; opacity: 0.85; line-height: 1.1; margin-bottom: 2px; }
+#entryTable thead th .th-dow{ font-size: 12px; letter-spacing: 0.04em; }

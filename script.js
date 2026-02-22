@@ -86,6 +86,26 @@ function fmtYYMMDD(d){
   const dd = String(d.getDate()).padStart(2,'0');
   return `${yy}.${mm}.${dd}`;
 }
+
+function setHeaderDatesFromSunday(sundayISO){
+  // sundayISO: YYYY-MM-DD
+  const dateEls = {
+    SUN: el('dateSUN'), MON: el('dateMON'), TUE: el('dateTUE'),
+    WED: el('dateWED'), THU: el('dateTHU'), FRI: el('dateFRI'), SAT: el('dateSAT')
+  };
+  if (!sundayISO){
+    Object.values(dateEls).forEach(x=>{ if (x) x.textContent=''; });
+    return;
+  }
+  const sun = parseISODate(sundayISO);
+  for (let i=0;i<7;i++){
+    const d = new Date(sun);
+    d.setDate(sun.getDate()+i);
+    const id = dayIds[i];
+    const txt = `${d.getMonth()+1}/${d.getDate()}`;
+    if (dateEls[id]) dateEls[id].textContent = txt;
+  }
+}
 function safeFilenameBase(weekEndingISO, businessPurpose){
   const sat = parseISODate(weekEndingISO);
   const sun = computeSundayFromWeekEnding(weekEndingISO);
@@ -188,11 +208,13 @@ function clearEntryValues(){
 function clearAllNew(){
   el('sundayDate').value='';
   el('weekEnding').value='';
+  setHeaderDatesFromSunday('');
   currentWeekEnding='';
   clearEntryValues();
   // Reset sync so next save prompts (matches your "New (clear all)" expectation)
   currentSync='';
   renderSync();
+  setHeaderDatesFromSunday(el('sundayDate').value);
   weeksCache=[];
   renderWeeksDropdown();
   setButtonsEnabled();
@@ -317,6 +339,7 @@ async function loadWeek(weekEndingISO){
     currentWeekEnding = weekEndingISO;
     el('weekEnding').value = weekEndingISO;
     el('sundayDate').value = toISODate(computeSundayFromWeekEnding(weekEndingISO));
+    setHeaderDatesFromSunday(el('sundayDate').value);
     applyData(out.data);
     renderWeeksDropdown(weekEndingISO);
     setStatus('Loaded.');
@@ -549,6 +572,7 @@ function onSundayChange(){
   }
   currentWeekEnding = newWeekEnding;
   el('weekEnding').value = currentWeekEnding;
+  setHeaderDatesFromSunday(v);
   setButtonsEnabled();
 }
 
