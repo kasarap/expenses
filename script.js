@@ -1,5 +1,5 @@
 // Weekly Expenses (Cloudflare Pages + KV)
-// No login. Sync key = Week Ending (Saturday) in YYYY-MM-DD.
+// No login. Manual Sync Name (like test-entry-log). Week Ending (Saturday) still drives date logic + export.
 
 const API = { data: '/api/data', weeks: '/api/weeks' };
 const el = (id) => document.getElementById(id);
@@ -44,6 +44,8 @@ const rows = [
 ];
 
 let currentWeekEnding = ''; // YYYY-MM-DD
+let currentSync = '';
+let entryIndex = new Map(); // sync -> {weekEnding}
 
 function toISODate(d){
   const y=d.getFullYear();
@@ -70,10 +72,22 @@ function computeSundayFromWeekEnding(weekEndingISO){
 function fmtMD(d){
   return `${d.getMonth()+1}-${d.getDate()}`;
 }
+
+function fmtYYMMDD(d){
+  const yy = String(d.getFullYear()).slice(-2);
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  return `${yy}.${mm}.${dd}`;
+}
 function weekLabel(weekEndingISO){
   const sat = parseISODate(weekEndingISO);
   const sun = computeSundayFromWeekEnding(weekEndingISO);
   return `Week ${fmtMD(sun)} through ${fmtMD(sat)}`;
+}
+
+function weekLabelWithPrefix(weekEndingISO){
+  const sat = parseISODate(weekEndingISO);
+  return `${fmtYYMMDD(sat)} - ${weekLabel(weekEndingISO)}`;
 }
 
 function setStatus(msg=''){
@@ -246,6 +260,7 @@ function serialize(){
     }
   });
   return {
+    syncName: currentSync,
     weekEnding: currentWeekEnding,
     businessPurpose: el('businessPurpose').value || '',
     entries
@@ -279,28 +294,41 @@ async function apiFetchJson(url, opts={}){
 async function refreshWeekDropdown(){
   try{
     const out = await apiFetchJson(API.weeks);
-    const weeks = Array.isArray(out.weeks) ? out.weeks : [];
+    const list = Array.isArray(out.entries) ? out.entries : [];
     const sel = el('weekSelect');
     const keep = sel.value;
     sel.innerHTML = '<option value="">(Select a week)</option>';
-    weeks.forEach(we=>{
+    entryIndex = new Map();
+    list.forEach(item=>{
+      const sync = (item && item.sync) ? String(item.sync) : '';
+      if (!sync) return;
+      const we = (item && item.weekEnding) ? String(item.weekEnding) : '';
+      entryIndex.set(sync, { weekEnding: we });
       const opt=document.createElement('option');
-      opt.value=we;
-      opt.textContent=weekLabel(we);
+      opt.value=sync;
+      const labelWE = we || (sync.match(/^\d{4}-\d{2}-\d{2}$/) ? sync : '');
+      opt.textContent = labelWE ? weekLabelWithPrefix(labelWE) : sync;
       sel.appendChild(opt);
     });
-    if (keep && weeks.includes(keep)) sel.value=keep;
+    if (keep && entryIndex.has(keep)) sel.value=keep;
   } catch {
     // ignore
   }
 }
 
 async function loadWeek(){
-  if (!currentWeekEnding) return;
+  if (!currentSync) return;
   setStatus('Loading…');
   try{
-    const out = await apiFetchJson(`${API.data}?weekEnding=${encodeURIComponent(currentWeekEnding)}`);
+    const out = await apiFetchJson(`${API.data}?sync=${encodeURIComponent(currentSync)}`);
     applyData(out.data);
+    if (out.data && typeof out.data.weekEnding === 'string' && out.data.weekEnding){
+      currentWeekEnding = out.data.weekEnding;
+      el('weekEnding').value = currentWeekEnding;
+      el('weekEndingLabel').value = weekLabelWithPrefix(currentWeekEnding);
+      el('sundayDate').value = toISODate(computeSundayFromWeekEnding(currentWeekEnding));
+      setButtonsEnabled(!!currentSync);
+    }
     setStatus(out.data ? 'Loaded.' : 'No saved data (new week).');
   } catch(e){
     setStatus('Load failed.');
@@ -308,28 +336,29 @@ async function loadWeek(){
 }
 
 async function saveWeek(){
-  if (!currentWeekEnding) return;
+  if (!currentSync) return;
   setStatus('Saving…');
   try{
-    await apiFetchJson(`${API.data}?weekEnding=${encodeURIComponent(currentWeekEnding)}`, {
+    await apiFetchJson(`${API.data}?sync=${encodeURIComponent(currentSync)}`, {
       method:'PUT',
       body: JSON.stringify(serialize())
     });
     setStatus('Saved.');
     await refreshWeekDropdown();
     // ensure selected
-    el('weekSelect').value = currentWeekEnding;
+    el('weekSelect').value = currentSync;
   } catch(e){
     setStatus('Save failed.');
   }
 }
 
 async function deleteWeek(){
-  if (!currentWeekEnding) return;
-  if (!confirm(`Delete saved data for ${weekLabel(currentWeekEnding)}?`)) return;
+  if (!currentSync) return;
+  const label = currentWeekEnding ? weekLabelWithPrefix(currentWeekEnding) : currentSync;
+  if (!confirm(`Delete saved data for ${label}?`)) return;
   setStatus('Deleting…');
   try{
-    await apiFetchJson(`${API.data}?weekEnding=${encodeURIComponent(currentWeekEnding)}`, {method:'DELETE'});
+    await apiFetchJson(`${API.data}?sync=${encodeURIComponent(currentSync)}`, {method:'DELETE'});
     clearInputs();
     setStatus('Deleted.');
     await refreshWeekDropdown();
@@ -360,6 +389,25 @@ async function downloadExcel(){
     const ab = await res.arrayBuffer();
 
     const zip = await JSZip.loadAsync(ab);
+
+    // Force Excel to recalc formulas on open (fixes mileage line not updating)
+    if (zip.file('xl/calcChain.xml')) zip.remove('xl/calcChain.xml');
+    if (zip.file('xl/workbook.xml')){
+      const wbXml = await zip.file('xl/workbook.xml').async('string');
+      const wbDoc = new DOMParser().parseFromString(wbXml, 'application/xml');
+      const calcPr = wbDoc.getElementsByTagName('calcPr')[0];
+      if (calcPr) {
+        calcPr.setAttribute('fullCalcOnLoad','1');
+      } else {
+        const wb = wbDoc.getElementsByTagName('workbook')[0];
+        if (wb){
+          const cp = wbDoc.createElementNS(wbDoc.documentElement.namespaceURI,'calcPr');
+          cp.setAttribute('fullCalcOnLoad','1');
+          wb.appendChild(cp);
+        }
+      }
+      zip.file('xl/workbook.xml', new XMLSerializer().serializeToString(wbDoc));
+    }
 
     // Load sheet XML
     const sheetPath = 'xl/worksheets/sheet1.xml';
@@ -480,23 +528,50 @@ function setWeekFromSunday(sundayISO){
   const sat = computeWeekEndingFromSunday(sundayISO);
   currentWeekEnding = toISODate(sat);
   el('weekEnding').value = currentWeekEnding;
-  el('weekSelect').value = currentWeekEnding; // may not exist yet; ok
+  el('weekEndingLabel').value = weekLabelWithPrefix(currentWeekEnding);
+  if (!currentSync){
+    currentSync = currentWeekEnding;
+    el('syncName').value = currentSync;
+  }
 }
 
 el('sundayDate').addEventListener('change', async ()=>{
   const v = el('sundayDate').value;
   if (!v) return;
+  if (!el('syncName').value.trim()) currentSync = '';
   setWeekFromSunday(v);
+  setButtonsEnabled(true);
   await loadWeek(); // auto-load if it exists
 });
 
 el('weekSelect').addEventListener('change', async ()=>{
   const v = el('weekSelect').value;
   if (!v) return;
-  currentWeekEnding = v;
-  el('weekEnding').value = v;
-  el('sundayDate').value = toISODate(computeSundayFromWeekEnding(v));
+  currentSync = v;
+  el('syncName').value = v;
+  const meta = entryIndex.get(v);
+  const we = meta && meta.weekEnding ? meta.weekEnding : (v.match(/^\d{4}-\d{2}-\d{2}$/) ? v : '');
+  if (we){
+    currentWeekEnding = we;
+    el('weekEnding').value = we;
+    el('weekEndingLabel').value = weekLabelWithPrefix(we);
+    el('sundayDate').value = toISODate(computeSundayFromWeekEnding(we));
+  }
   await loadWeek();
+});
+
+el('syncName').addEventListener('input', ()=>{
+  currentSync = el('syncName').value.trim();
+  setButtonsEnabled(!!currentSync);
+});
+
+el('syncName').addEventListener('keydown', async (e)=>{
+  if (e.key === 'Enter'){
+    e.preventDefault();
+    currentSync = el('syncName').value.trim();
+    setButtonsEnabled(!!currentSync);
+    await loadWeek();
+  }
 });
 
 el('btnSave').addEventListener('click', saveWeek);
@@ -515,19 +590,21 @@ el('btnDownload').addEventListener('click', downloadExcel);
   el('sundayDate').value = toISODate(sun);
   setWeekFromSunday(toISODate(sun));
 
+  el('syncName').value = currentSync;
+
   refreshWeekDropdown().then(async ()=>{
-    // If this week exists in dropdown, keep it selected
-    el('weekSelect').value = currentWeekEnding;
+    // If this sync exists in dropdown, keep it selected
+    if (entryIndex.has(currentSync)) el('weekSelect').value = currentSync;
     await loadWeek();
   });
 
-  // enable buttons once we have a week ending
-  setButtonsEnabled(true);
+  // enable buttons once we have a sync name
+  setButtonsEnabled(!!currentSync);
 })();
 
 function setButtonsEnabled(on){
   el('btnSave').disabled = !on;
   el('btnClear').disabled = !on;
-  el('btnDownload').disabled = !on;
+  el('btnDownload').disabled = !currentWeekEnding;
   el('btnDeleteWeek').disabled = !on;
 }

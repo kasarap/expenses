@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Weekly Expenses</title>
   <link rel="stylesheet" href="styles.css">
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.19.3/dist/xlsx.full.min.js"></script>
 </head>
 <body>
   <header class="bar">
@@ -22,7 +21,7 @@
 <section class="card">
       <h2>Week</h2>
       <div class="grid3">
-        <label>Pick a saved week
+        <label>Pick a saved entry
           <select id="weekSelect">
             <option value="">(Select a week)</option>
           </select>
@@ -35,6 +34,15 @@
         </label>
       </div>
 
+      <div class="grid2">
+        <label>Sync Name
+          <input id="syncName" placeholder="type anything">
+        </label>
+        <label>Week label
+          <input id="weekEndingLabel" placeholder="YY.MM.DD - Week m-d through m-d" disabled>
+        </label>
+      </div>
+
       <div class="row">
         <button id="btnDeleteWeek" class="danger" disabled>Delete selected week</button>
       </div>
@@ -43,10 +51,10 @@
         <label>Business Purpose of Expenses
           <input id="businessPurpose" placeholder="e.g., Angelton Flights">
         </label>
-</div>
+      </div>
 
       <div class="row">
-<button id="btnSave" class="ghost" disabled>Save now</button>
+        <button id="btnSave" class="ghost" disabled>Save now</button>
         <button id="btnClear" class="danger" disabled>Clear inputs (does not delete cloud)</button>
         <span id="saveStatus" class="status"></span>
       </div>

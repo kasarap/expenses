@@ -11,15 +11,18 @@ export async function onRequest(context) {
   if (!kv) return json({ error: 'Missing KV binding EXPENSES_KV' }, 500);
 
   const url = new URL(request.url);
+  // Manual sync name (like test-entry-log). If not provided, fall back to weekEnding.
+  const sync = (url.searchParams.get('sync') || '').trim();
   const weekEnding = (url.searchParams.get('weekEnding') || '').trim();
-  if (!weekEnding) return json({ error: 'Missing weekEnding' }, 400);
+  const syncKey = sync || weekEnding;
+  if (!syncKey) return json({ error: 'Missing sync' }, 400);
 
-  const key = `expenses:${weekEnding}`;
+  const key = `expenses:${syncKey}`;
   const method = request.method.toUpperCase();
 
   if (method === 'GET') {
     const data = await kv.get(key, { type: 'json' });
-    return json({ weekEnding, data: data || null });
+    return json({ sync: syncKey, data: data || null });
   }
 
   if (method === 'PUT' || method === 'POST') {
