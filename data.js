@@ -11,41 +11,39 @@ export async function onRequest(context) {
   if (!kv) return json({ error: 'Missing KV binding EXPENSES_KV' }, 500);
 
   const url = new URL(request.url);
-  // Manual sync name (like test-entry-log). If not provided, fall back to weekEnding.
-  const id = (url.searchParams.get('id') || '').trim();
   const sync = (url.searchParams.get('sync') || '').trim();
-  const weekEnding = (url.searchParams.get('weekEnding') || '').trim();
+  const weekEnding = (url.searchParams.get('weekEnding') || '').trim(); // YYYY-MM-DD
 
-  // Preferred: explicit entry id (weekEnding__syncName)
-  let entryId = id;
-  if (!entryId){
-    // Backward compatibility
-    const syncKey = sync || weekEnding;
-    if (!syncKey) return json({ error: 'Missing id' }, 400);
-    entryId = syncKey;
-  }
-  const key = `expenses:${entryId}`;
+  if (!sync) return json({ error: 'Missing sync' }, 400);
+  if (!weekEnding) return json({ error: 'Missing weekEnding' }, 400);
+
+  const key = `expenses:${sync}:${weekEnding}`;
   const method = request.method.toUpperCase();
 
   if (method === 'GET') {
     const data = await kv.get(key, { type: 'json' });
-    return json({ id: entryId, data: data || null });
+    return json({ sync, weekEnding, data: data || null });
   }
 
   if (method === 'PUT' || method === 'POST') {
     let body;
     try { body = await request.json(); }
     catch { return json({ error: 'Invalid JSON' }, 400); }
+
     const now = new Date().toISOString();
-    // Preserve createdAt if it already exists.
     let existing = null;
     try { existing = await kv.get(key, { type: 'json' }); } catch {}
+
     const createdAt = (existing && typeof existing.createdAt === 'string' && existing.createdAt) ? existing.createdAt : now;
+
     const merged = {
       ...(body || {}),
+      sync,
+      weekEnding,
       createdAt,
       updatedAt: now,
     };
+
     await kv.put(key, JSON.stringify(merged));
     return json({ ok: true });
   }

@@ -11,17 +11,18 @@ export async function onRequest(context) {
   if (!kv) return json({ error: 'Missing KV binding EXPENSES_KV' }, 500);
 
   const url = new URL(request.url);
+  const sync = (url.searchParams.get('sync') || '').trim();
+  const weekEnding = (url.searchParams.get('weekEnding') || '').trim(); // YYYY-MM-DD
 
-  // Use ?id= for the record key. Back-compat: accept ?sync= too.
-  const id = (url.searchParams.get('id') || url.searchParams.get('sync') || '').trim();
-  if (!id) return json({ error: 'Missing id' }, 400);
+  if (!sync) return json({ error: 'Missing sync' }, 400);
+  if (!weekEnding) return json({ error: 'Missing weekEnding' }, 400);
 
-  const key = `expenses:${id}`;
+  const key = `expenses:${sync}:${weekEnding}`;
   const method = request.method.toUpperCase();
 
   if (method === 'GET') {
     const data = await kv.get(key, { type: 'json' });
-    return json({ id, data: data || null });
+    return json({ sync, weekEnding, data: data || null });
   }
 
   if (method === 'PUT' || method === 'POST') {
@@ -30,7 +31,6 @@ export async function onRequest(context) {
     catch { return json({ error: 'Invalid JSON' }, 400); }
 
     const now = new Date().toISOString();
-
     let existing = null;
     try { existing = await kv.get(key, { type: 'json' }); } catch {}
 
@@ -38,6 +38,8 @@ export async function onRequest(context) {
 
     const merged = {
       ...(body || {}),
+      sync,
+      weekEnding,
       createdAt,
       updatedAt: now,
     };
