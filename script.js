@@ -403,6 +403,8 @@ async function downloadExcel(){
     const parser = new DOMParser();
     const doc = parser.parseFromString(sheetXml, 'application/xml');
 
+    const ns = doc.documentElement && doc.documentElement.namespaceURI ? doc.documentElement.namespaceURI : 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+
     function setCell(addr, value, type){
       // type: 'n' number, 's' shared string (we use inlineStr for simplicity), 'str' inline string
       let c = doc.querySelector(`c[r="${addr}"]`);
@@ -411,27 +413,39 @@ async function downloadExcel(){
         const rowNum = Number(addr.match(/\d+$/)[0]);
         let row = doc.querySelector(`row[r="${rowNum}"]`);
         if (!row){
-          row = doc.createElement('row');
+          row = doc.createElementNS(ns,'row');
           row.setAttribute('r', String(rowNum));
           // append in order (simple append; Excel will still open)
-          doc.querySelector('sheetData').appendChild(row);
+          const sheetData = doc.querySelector('sheetData');
+          // Insert rows in numeric order (helps Excel)
+          const rows = Array.from(sheetData.querySelectorAll('row[r]'));
+          const insertBefore = rows.find(r => Number(r.getAttribute('r')) > rowNum);
+          if (insertBefore) sheetData.insertBefore(row, insertBefore);
+          else sheetData.appendChild(row);
         }
-        c = doc.createElement('c');
+        c = doc.createElementNS(ns,'c');
         c.setAttribute('r', addr);
-        row.appendChild(c);
+        // Insert cells in column order
+        const cells = Array.from(row.querySelectorAll('c[r]'));
+        const col = addr.match(/^[A-Z]+/)[0];
+        const colToNum = (s)=>{let n=0; for(const ch of s){ n = n*26 + (ch.charCodeAt(0)-64);} return n;};
+        const thisNum = colToNum(col);
+        const insertC = cells.find(cc => colToNum(cc.getAttribute('r').match(/^[A-Z]+/)[0]) > thisNum);
+        if (insertC) row.insertBefore(c, insertC);
+        else row.appendChild(c);
       }
       // clear children
       while (c.firstChild) c.removeChild(c.firstChild);
 
       if (type === 'n'){
         c.removeAttribute('t');
-        const v = doc.createElement('v');
+        const v = doc.createElementNS(ns,'v');
         v.textContent = String(value);
         c.appendChild(v);
       } else {
         c.setAttribute('t','inlineStr');
-        const is = doc.createElement('is');
-        const t = doc.createElement('t');
+        const is = doc.createElementNS(ns,'is');
+        const t = doc.createElementNS(ns,'t');
         t.textContent = String(value);
         is.appendChild(t);
         c.appendChild(is);
