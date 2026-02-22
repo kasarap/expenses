@@ -28,13 +28,23 @@ export async function onRequest(context) {
 
   // Pull metadata from each record so we can sort by most recently edited.
   const entries = [];
-  for (const sync of keys) {
+  for (const id of keys) {
     let data = null;
-    try { data = await kv.get(`expenses:${sync}`, { type: 'json' }); } catch {}
-    const we = (data && typeof data.weekEnding === 'string') ? data.weekEnding : '';
+    try { data = await kv.get(`expenses:${id}`, { type: 'json' }); } catch {}
+
+    // id format: YYYY-MM-DD__SyncName (preferred)
+    let syncName = id;
+    let idWeekEnding = '';
+    const idx = id.indexOf('__');
+    if (idx !== -1) {
+      idWeekEnding = id.slice(0, idx);
+      syncName = id.slice(idx + 2);
+    }
+
+    const we = (data && typeof data.weekEnding === 'string' && data.weekEnding) ? data.weekEnding : (idWeekEnding || '');
     const bp = (data && typeof data.businessPurpose === 'string') ? data.businessPurpose : '';
     const updatedAt = (data && typeof data.updatedAt === 'string') ? data.updatedAt : '';
-    entries.push({ sync, weekEnding: we, businessPurpose: bp, updatedAt });
+    entries.push({ id, sync: syncName, weekEnding: we, businessPurpose: bp, updatedAt });
   }
 
   // Sort by updatedAt desc (most recently edited first). Fallback to weekEnding desc, then sync.

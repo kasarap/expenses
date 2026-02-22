@@ -45,6 +45,7 @@ const rows = [
 
 let currentWeekEnding = ''; // YYYY-MM-DD
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
+let currentEntryId = (localStorage.getItem('expenses_entry_id') || '').trim();
 let entryIndex = new Map(); // sync -> {weekEnding}
 
 function safeFilenameBase(weekEndingISO, businessPurpose){
@@ -338,14 +339,15 @@ async function refreshWeekDropdown(){
     sel.innerHTML = '<option value="">(Select a week)</option>';
     entryIndex = new Map();
     list.forEach(item=>{
+      const id = (item && item.id) ? String(item.id) : '';
+      if (!id) return;
       const sync = (item && item.sync) ? String(item.sync) : '';
-      if (!sync) return;
       const we = (item && item.weekEnding) ? String(item.weekEnding) : '';
       const bp = (item && item.businessPurpose) ? String(item.businessPurpose) : '';
       const updatedAt = (item && item.updatedAt) ? String(item.updatedAt) : '';
-      entryIndex.set(sync, { weekEnding: we, businessPurpose: bp, updatedAt });
+      entryIndex.set(id, { weekEnding: we, businessPurpose: bp, updatedAt, sync });
       const opt=document.createElement('option');
-      opt.value=sync;
+      opt.value=id;
       const labelWE = we || (sync.match(/^\d{4}-\d{2}-\d{2}$/) ? sync : '');
       if (labelWE){
         const base = safeFilenameBase(labelWE, bp);
@@ -362,18 +364,19 @@ async function refreshWeekDropdown(){
 }
 
 async function loadWeek(){
-  if (!currentSync) return;
+  const id = (currentEntryId || '').trim();
+  if (!id) return;
   setStatus('Loading…');
   try{
-    const out = await apiFetchJson(`${API.data}?sync=${encodeURIComponent(currentSync)}`);
+    const out = await apiFetchJson(`${API.data}?id=${encodeURIComponent(id)}`);
     applyData(out.data);
     if (out.data && typeof out.data.weekEnding === 'string' && out.data.weekEnding){
       currentWeekEnding = out.data.weekEnding;
       el('weekEnding').value = currentWeekEnding;
-el('sundayDate').value = toISODate(computeSundayFromWeekEnding(currentWeekEnding));
+      el('sundayDate').value = toISODate(computeSundayFromWeekEnding(currentWeekEnding));
       setButtonsEnabled();
     }
-    setStatus(out.data ? 'Loaded.' : 'No saved data (new week).');
+    setStatus(out.data ? 'Loaded.' : 'No saved data (new entry).');
   } catch(e){
     setStatus('Load failed.');
   }
@@ -381,33 +384,48 @@ el('sundayDate').value = toISODate(computeSundayFromWeekEnding(currentWeekEnding
 
 async function saveWeek(){
   if (!ensureSync()) return;
+  const weekEnding = (el('weekEnding').value || '').trim();
+  if (!weekEnding){
+    setStatus('Enter the Sunday date first.');
+    return;
+  }
+  currentEntryId = makeEntryId(weekEnding, currentSync);
+  localStorage.setItem('expenses_entry_id', currentEntryId);
+
   setStatus('Saving…');
   try{
-    await apiFetchJson(`${API.data}?sync=${encodeURIComponent(currentSync)}`, {
+    await apiFetchJson(`${API.data}?id=${encodeURIComponent(currentEntryId)}`, {
       method:'PUT',
       body: JSON.stringify(serialize())
     });
     setStatus('Saved.');
     await refreshWeekDropdown();
-    // ensure selected
-    el('weekSelect').value = currentSync;
+    el('weekSelect').value = currentEntryId;
   } catch(e){
     setStatus('Save failed.');
   }
 }
 
 async function deleteWeek(){
-  if (!currentSync) return;
-  const label = currentWeekEnding ? weekLabelWithPrefix(currentWeekEnding) : currentSync;
+  const id = (el('weekSelect').value || currentEntryId || '').trim();
+  if (!id) return;
+  const parts = parseEntryId(id);
+  const labelWE = parts.weekEnding ? fmtYYMMDD(parseISODate(parts.weekEnding)) : '';
+  const label = labelWE ? `${labelWE} - ${parts.sync}` : parts.sync;
   if (!confirm(`Delete saved data for ${label}?`)) return;
+
   setStatus('Deleting…');
   try{
-    await apiFetchJson(`${API.data}?sync=${encodeURIComponent(currentSync)}`, {method:'DELETE'});
-    clearInputs();
+    await apiFetchJson(`${API.data}?id=${encodeURIComponent(id)}`, {method:'DELETE'});
+    // if we deleted the currently loaded entry, clear form
+    if (id === currentEntryId){
+      clearInputs({ resetSync:false, resetWeekSelect:true, resetDates:true });
+      currentEntryId = '';
+      localStorage.removeItem('expenses_entry_id');
+    }
     setStatus('Deleted.');
     await refreshWeekDropdown();
-    el('weekSelect').value='';
-  } catch{
+  } catch(e){
     setStatus('Delete failed.');
   }
 }
@@ -630,7 +648,9 @@ el('sundayDate').addEventListener('change', ()=>{
   if (currentWeekEnding){
     const nextWE = toISODate(computeWeekEndingFromSunday(v));
     if (nextWE !== currentWeekEnding){
-      clearInputs({ resetDates:false, resetWeekSelect:true, resetSync:true });
+      clearInputs({ resetDates:false, resetWeekSelect:true, resetSync:false });
+      currentEntryId='';
+      localStorage.removeItem('expenses_entry_id');
       el('businessPurpose').value='';
     }
   }
@@ -640,13 +660,19 @@ el('sundayDate').addEventListener('change', ()=>{
 
 
 el('weekSelect').addEventListener('change', async ()=>{
-  const v = el('weekSelect').value;
-  if (!v) return;
-  currentSync = v;
+  const id = (el('weekSelect').value || '').trim();
+  if (!id) return;
+
+  currentEntryId = id;
+  localStorage.setItem('expenses_entry_id', currentEntryId);
+
+  const parts = parseEntryId(id);
+  currentSync = parts.sync || '';
+  localStorage.setItem('expenses_sync_name', currentSync);
   renderSync();
 
-  const meta = entryIndex.get(v);
-  const we = meta && meta.weekEnding ? meta.weekEnding : (v.match(/^\d{4}-\d{2}-\d{2}$/) ? v : '');
+  const meta = entryIndex.get(id);
+  const we = (meta && meta.weekEnding) ? meta.weekEnding : parts.weekEnding;
   if (we){
     currentWeekEnding = we;
     el('weekEnding').value = we;
@@ -681,9 +707,11 @@ el('btnDownload').addEventListener('click', downloadExcel);
     const s = sanitizeSyncName(v || '');
     if (!s) return;
     currentSync = s;
+    localStorage.setItem('expenses_sync_name', currentSync);
+    // Changing sync starts a new entry id on next save
+    currentEntryId = '';
+    localStorage.removeItem('expenses_entry_id');
     renderSync();
-    // If this exists in dropdown, select it
-    if (entryIndex.has(currentSync)) el('weekSelect').value = currentSync;
     setButtonsEnabled();
   });
 
@@ -692,11 +720,16 @@ el('btnDownload').addEventListener('click', downloadExcel);
     const sel = el('weekSelect');
     const firstReal = Array.from(sel.options).find(o=>o.value);
     if (firstReal){
-      currentSync = firstReal.value;
+      currentEntryId = firstReal.value;
+      localStorage.setItem('expenses_entry_id', currentEntryId);
+      const parts = parseEntryId(currentEntryId);
+      currentSync = parts.sync || '';
+      localStorage.setItem('expenses_sync_name', currentSync);
       renderSync();
-      sel.value = currentSync;
-      const meta = entryIndex.get(currentSync);
-      const we = meta && meta.weekEnding ? meta.weekEnding : '';
+      sel.value = currentEntryId;
+
+      const meta = entryIndex.get(currentEntryId);
+      const we = (meta && meta.weekEnding) ? meta.weekEnding : parts.weekEnding;
       if (we){
         currentWeekEnding = we;
         el('weekEnding').value = we;
@@ -718,7 +751,7 @@ function setButtonsEnabled(){
   el('btnClear').disabled = !hasWeek;
   el('btnDownload').disabled = !hasWeek;
   // Delete only if this sync exists in KV list (so we don't delete an unsaved draft)
-  el('btnDeleteWeek').disabled = !(hasSync && entryIndex.has(currentSync));
+  el('btnDeleteWeek').disabled = !((el('weekSelect').value||currentEntryId) && entryIndex.has((el('weekSelect').value||currentEntryId)));
 }
 function sanitizeSyncName(s){
   if (!s) return '';
@@ -738,9 +771,22 @@ function ensureSync(){
     return false;
   }
   currentSync = s;
+  localStorage.setItem('expenses_sync_name', currentSync);
+  // entry id will be derived on save (needs week ending)
   renderSync();
   setButtonsEnabled();
   return true;
+}
+
+function makeEntryId(weekEnding, sync){
+  return `${weekEnding}__${sync}`;
+}
+
+function parseEntryId(id){
+  const s = String(id||'');
+  const idx = s.indexOf('__');
+  if (idx === -1) return { weekEnding:'', sync:s };
+  return { weekEnding: s.slice(0, idx), sync: s.slice(idx+2) };
 }
 
 
