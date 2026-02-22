@@ -214,25 +214,38 @@ function allInputs(){
   return Array.from(el('entryTable').querySelectorAll('input'));
 }
 
-function clearInputs(){
-  // Clear all entry fields + dates (does NOT delete cloud)
-  allInputs().forEach(i=>i.value='');
-  el('businessPurpose').value='';
-  el('sundayDate').value='';
-  el('weekEnding').value='';
-  currentWeekEnding = null;
+function clearInputs(opts = {}){
+  // Clear on-screen fields (does NOT delete cloud unless you use Delete)
+  const { resetSync = true, resetWeekSelect = true, resetDates = true } = opts;
 
-  // Reset current sync so next Save prompts for a new Sync Name
-  currentSync = '';
-  renderSync();
+  allInputs().forEach(i => i.value = '');
+  el('businessPurpose').value = '';
 
-  // Reset dropdown selection
-  const sel = el('weekSelect');
-  if (sel) sel.value = '';
+  if (resetDates){
+    el('sundayDate').value = '';
+    el('weekEnding').value = '';
+    currentWeekEnding = null;
+  }
+
+  if (resetSync){
+    // Reset current sync so next Save prompts for a new Sync Name
+    currentSync = '';
+    renderSync();
+  }
+
+  if (resetWeekSelect){
+    const sel = el('weekSelect');
+    if (sel) sel.value = '';
+  }
 
   computeTotals();
-  setStatus('Cleared. Enter a Sunday date (and set Sync Name on Save).');
+  if (resetDates){
+    setStatus('Cleared. Enter a Sunday date (and set Sync Name on Save).');
+  } else {
+    setStatus('');
+  }
 }
+
 
 function recomputeDerived(){
   // Personal Car Mileage (row 29) = Business miles (row 10) * MILEAGE_RATE
@@ -294,7 +307,7 @@ function serialize(){
 }
 
 function applyData(data){
-  clearInputs();
+  clearInputs({ resetSync: false, resetWeekSelect: false, resetDates: false });
   if (!data) return;
   el('businessPurpose').value = data.businessPurpose || '';
   const map = data.entries || {};
