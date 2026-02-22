@@ -343,7 +343,14 @@ async function downloadExcel(){
   if (!currentWeekEnding) return;
   setStatus('Building Excel…');
   try{
-    const templateRes = await fetch('Expenses%20Form.xlsx', {cache:'no-store'});
+    await ensureXLSX();
+    if (typeof XLSX === 'undefined') throw new Error('XLSX library not loaded');
+
+    // Template fetch: try encoded and unencoded paths (some deployments normalize filenames)
+    let templateRes = await fetch('/Expenses%20Form.xlsx', {cache:'no-store'}).catch(()=>null);
+    if (!templateRes || !templateRes.ok) templateRes = await fetch('Expenses%20Form.xlsx', {cache:'no-store'});
+    if (!templateRes.ok) templateRes = await fetch('/Expenses Form.xlsx', {cache:'no-store'});
+    if (!templateRes.ok) templateRes = await fetch('Expenses Form.xlsx', {cache:'no-store'});
     if (!templateRes.ok) throw new Error('Template not found');
     const buf = await templateRes.arrayBuffer();
     const wb = XLSX.read(buf, {type:'array'});
@@ -390,7 +397,36 @@ async function downloadExcel(){
     setStatus('Excel downloaded.');
   } catch (err) {
     console.error(err);
-    setStatus('Excel export failed.');
+    setStatus(`Excel export failed: ${err?.message || err}`);
+  }
+}
+
+// Some networks/ad-blockers block jsdelivr. If XLSX isn't present, try alternate CDNs.
+function loadScript(src){
+  return new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error(`Failed to load ${src}`));
+    document.head.appendChild(s);
+  });
+}
+
+async function ensureXLSX(){
+  if (typeof XLSX !== 'undefined') return;
+  const candidates = [
+    'https://cdn.jsdelivr.net/npm/xlsx@0.19.3/dist/xlsx.full.min.js',
+    'https://unpkg.com/xlsx@0.19.3/dist/xlsx.full.min.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.19.3/xlsx.full.min.js'
+  ];
+  for (const url of candidates){
+    try{
+      await loadScript(url);
+      if (typeof XLSX !== 'undefined') return;
+    } catch {
+      // try next
+    }
   }
 }
 
