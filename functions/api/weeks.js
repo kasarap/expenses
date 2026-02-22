@@ -13,17 +13,24 @@ export async function onRequest(context) {
   const list = await kv.list({ prefix: 'expenses:' });
   const keys = (list.keys || []).map(k => k.name.replace(/^expenses:/,''));
 
-  // Pull weekEnding metadata from each record so we can sort newest-first even if sync names are arbitrary.
+  // Pull metadata from each record so we can sort by most recently edited.
   const entries = [];
   for (const sync of keys) {
     let data = null;
     try { data = await kv.get(`expenses:${sync}`, { type: 'json' }); } catch {}
     const we = (data && typeof data.weekEnding === 'string') ? data.weekEnding : '';
-    entries.push({ sync, weekEnding: we });
+    const bp = (data && typeof data.businessPurpose === 'string') ? data.businessPurpose : '';
+    const updatedAt = (data && typeof data.updatedAt === 'string') ? data.updatedAt : '';
+    entries.push({ sync, weekEnding: we, businessPurpose: bp, updatedAt });
   }
 
-  // Sort by weekEnding (ISO) desc (newest first). If missing, sort by sync desc.
+  // Sort by updatedAt desc (most recently edited first). Fallback to weekEnding desc, then sync.
   entries.sort((a,b)=>{
+    const au=a.updatedAt||'';
+    const bu=b.updatedAt||'';
+    if (au && bu) return bu.localeCompare(au);
+    if (bu) return 1;
+    if (au) return -1;
     const aw=a.weekEnding||'';
     const bw=b.weekEnding||'';
     if (aw && bw) return bw.localeCompare(aw);

@@ -48,6 +48,17 @@ let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
 let pendingAction = null;
 let entryIndex = new Map(); // sync -> {weekEnding}
 
+function safeFilenameBase(weekEndingISO, businessPurpose){
+  // Matches the export filename base but without the .xlsx extension.
+  const sat = parseISODate(weekEndingISO);
+  const sun = computeSundayFromWeekEnding(weekEndingISO);
+  const mdSun = fmtMD(sun);
+  const mdSat = fmtMD(sat);
+  const bp = (businessPurpose || 'Expenses').trim();
+  const safeBp = bp.replace(/[\/:*?"<>|]+/g,'').trim() || 'Expenses';
+  return `Week ${mdSun} through ${mdSat} - ${safeBp}`;
+}
+
 function toISODate(d){
   const y=d.getFullYear();
   const m=String(d.getMonth()+1).padStart(2,'0');
@@ -204,9 +215,23 @@ function allInputs(){
 }
 
 function clearInputs(){
+  // Clear all entry fields + dates (does NOT delete cloud)
   allInputs().forEach(i=>i.value='');
   el('businessPurpose').value='';
+  el('sundayDate').value='';
+  el('weekEnding').value='';
+  currentWeekEnding = null;
+
+  // Reset current sync so next Save prompts for a new Sync Name
+  currentSync = '';
+  renderSync();
+
+  // Reset dropdown selection
+  const sel = el('weekSelect');
+  if (sel) sel.value = '';
+
   computeTotals();
+  setStatus('Cleared. Enter a Sunday date (and set Sync Name on Save).');
 }
 
 function recomputeDerived(){
@@ -296,17 +321,6 @@ async function refreshWeekDropdown(){
   try{
     const out = await apiFetchJson(API.weeks);
     let list = Array.isArray(out.entries) ? out.entries : [];
-    // Sort newest year/week first (descending by weekEnding date when available)
-    list = list.slice().sort((a,b)=>{
-      const aw = (a && a.weekEnding) ? String(a.weekEnding) : '';
-      const bw = (b && b.weekEnding) ? String(b.weekEnding) : '';
-      if (aw && bw) return bw.localeCompare(aw); // ISO dates sort lexicographically
-      if (aw) return -1;
-      if (bw) return 1;
-      const as = (a && a.sync) ? String(a.sync) : '';
-      const bs = (b && b.sync) ? String(b.sync) : '';
-      return bs.localeCompare(as);
-    });
     const sel = el('weekSelect');
     const keep = sel.value;
     sel.innerHTML = '<option value="">(Select a week)</option>';
@@ -315,11 +329,18 @@ async function refreshWeekDropdown(){
       const sync = (item && item.sync) ? String(item.sync) : '';
       if (!sync) return;
       const we = (item && item.weekEnding) ? String(item.weekEnding) : '';
-      entryIndex.set(sync, { weekEnding: we });
+      const bp = (item && item.businessPurpose) ? String(item.businessPurpose) : '';
+      const updatedAt = (item && item.updatedAt) ? String(item.updatedAt) : '';
+      entryIndex.set(sync, { weekEnding: we, businessPurpose: bp, updatedAt });
       const opt=document.createElement('option');
       opt.value=sync;
       const labelWE = we || (sync.match(/^\d{4}-\d{2}-\d{2}$/) ? sync : '');
-      opt.textContent = labelWE ? `${fmtYYMMDD(parseISODate(labelWE))} - ${sync}` : sync;
+      if (labelWE){
+        const base = safeFilenameBase(labelWE, bp);
+        opt.textContent = `${fmtYYMMDD(parseISODate(labelWE))} - ${base}`;
+      } else {
+        opt.textContent = sync;
+      }
       sel.appendChild(opt);
     });
     if (keep && entryIndex.has(keep)) sel.value=keep;
@@ -411,11 +432,17 @@ async function downloadExcel(){
       const calcPr = wbDoc.getElementsByTagName('calcPr')[0];
       if (calcPr) {
         calcPr.setAttribute('fullCalcOnLoad','1');
+        calcPr.setAttribute('calcMode','auto');
+        calcPr.setAttribute('calcOnSave','1');
+        calcPr.setAttribute('calcCompleted','0');
       } else {
         const wb = wbDoc.getElementsByTagName('workbook')[0];
         if (wb){
           const cp = wbDoc.createElementNS(wbDoc.documentElement.namespaceURI,'calcPr');
           cp.setAttribute('fullCalcOnLoad','1');
+          cp.setAttribute('calcMode','auto');
+          cp.setAttribute('calcOnSave','1');
+          cp.setAttribute('calcCompleted','0');
           wb.appendChild(cp);
         }
       }
@@ -511,7 +538,8 @@ async function downloadExcel(){
       else setCellStringInline(addr, String(val));
     }
 
-    setCellNumber('B10', MILEAGE_RATE);
+    // Leave template mileage rate in B10 to preserve formatting and any future changes.
+    // setCellNumber('B10', MILEAGE_RATE);
 
     const serializer = new XMLSerializer();
     zip.file(sheetPath, serializer.serializeToString(sheetDoc));
@@ -621,8 +649,20 @@ el('btnDownload').addEventListener('click', downloadExcel);
   });
 
   refreshWeekDropdown().then(async ()=>{
-    if (currentSync && entryIndex.has(currentSync)){
-      el('weekSelect').value = currentSync;
+    // On page load, automatically select and load the most recently edited entry (top of dropdown)
+    const sel = el('weekSelect');
+    const firstReal = Array.from(sel.options).find(o=>o.value);
+    if (firstReal){
+      currentSync = firstReal.value;
+      renderSync();
+      sel.value = currentSync;
+      const meta = entryIndex.get(currentSync);
+      const we = meta && meta.weekEnding ? meta.weekEnding : '';
+      if (we){
+        currentWeekEnding = we;
+        el('weekEnding').value = we;
+        el('sundayDate').value = toISODate(computeSundayFromWeekEnding(we));
+      }
       await loadWeek();
     }
     setButtonsEnabled();

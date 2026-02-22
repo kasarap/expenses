@@ -29,7 +29,17 @@ export async function onRequest(context) {
     let body;
     try { body = await request.json(); }
     catch { return json({ error: 'Invalid JSON' }, 400); }
-    await kv.put(key, JSON.stringify(body));
+    const now = new Date().toISOString();
+    // Preserve createdAt if it already exists.
+    let existing = null;
+    try { existing = await kv.get(key, { type: 'json' }); } catch {}
+    const createdAt = (existing && typeof existing.createdAt === 'string' && existing.createdAt) ? existing.createdAt : now;
+    const merged = {
+      ...(body || {}),
+      createdAt,
+      updatedAt: now,
+    };
+    await kv.put(key, JSON.stringify(merged));
     return json({ ok: true });
   }
 
