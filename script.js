@@ -51,315 +51,18 @@ let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
 let pendingAction = null;
 let entryIndex = new Map(); // weekEnding -> {businessPurpose, updatedAt}
 
-function safeFilenameBase(weekEndingISO, businessPurpose){
-  // Matches the export filename base but without the .xlsx extension.
-  const sat = parseISODate(weekEndingISO);
-  const sun = computeSundayFromWeekEnding(weekEndingISO);
-  const mdSun = fmtMD(sun);
-  const mdSat = fmtMD(sat);
-  const bp = (businessPurpose || 'Expenses').trim();
-  const safeBp = bp.replace(/[\/:*?"<>|]+/g,'').trim() || 'Expenses';
-  return `Week ${mdSun} through ${mdSat} - ${safeBp}`;
-}
 
-function toISODate(d){
-  const y=d.getFullYear();
-  const m=String(d.getMonth()+1).padStart(2,'0');
-  const da=String(d.getDate()).padStart(2,'0');
-  return `${y}-${m}-${da}`;
-}
-function parseISODate(s){
-  const [y,m,d]=s.split('-').map(Number);
-  return new Date(y,m-1,d);
-}
-function computeWeekEndingFromSunday(sundayISO){
-  const sun = parseISODate(sundayISO);
-  const sat = new Date(sun);
-  sat.setDate(sun.getDate()+6);
-  return sat;
-}
-function computeSundayFromWeekEnding(weekEndingISO){
-  const sat = parseISODate(weekEndingISO);
-  const sun = new Date(sat);
-  sun.setDate(sat.getDate()-6);
-  return sun;
-}
-function fmtMD(d){
-  return `${d.getMonth()+1}-${d.getDate()}`;
-}
-
-function fmtYYMMDD(d){
-  const yy = String(d.getFullYear()).slice(-2);
-  const mm = String(d.getMonth()+1).padStart(2,'0');
-  const dd = String(d.getDate()).padStart(2,'0');
-  return `${yy}.${mm}.${dd}`;
-}
-function weekLabel(weekEndingISO){
-  const sat = parseISODate(weekEndingISO);
-  const sun = computeSundayFromWeekEnding(weekEndingISO);
-  return `Week ${fmtMD(sun)} through ${fmtMD(sat)}`;
-}
-
-function weekLabelWithPrefix(weekEndingISO){
-  const sat = parseISODate(weekEndingISO);
-  return `${fmtYYMMDD(sat)}`;
-}
-
-function setStatus(msg=''){
-  el('saveStatus').textContent = msg;
-}
-
-function buildTable(){
-  const tbody = el('entryTable').querySelector('tbody');
-  tbody.innerHTML = '';
-  rows.forEach(r=>{
-    if (r.type === 'divider'){
-      const tr=document.createElement('tr');
-      tr.className='divider-row';
-      const td=document.createElement('td');
-      td.colSpan = 8;
-      td.className='divider-cell';
-      tr.appendChild(td);
-      tbody.appendChild(tr);
-      return;
-    }
-    const tr=document.createElement('tr');
-
-    const tdLabel=document.createElement('td');
-    tdLabel.className='stickyLabel';
-    tdLabel.textContent=r.label;
-
-    tr.appendChild(tdLabel);
-
-    for (let i=0;i<7;i++){
-      const td=document.createElement('td');
-      const inp=document.createElement('input');
-      inp.dataset.row=String(r.row);
-      inp.dataset.col=dayCols[i];
-      inp.dataset.type=r.type;
-      if (r.computed) { inp.dataset.computed='true'; inp.readOnly = true; inp.tabIndex = -1; }
-
-      if (r.type==='number'){
-        inp.inputMode='numeric';
-        inp.placeholder='0';
-        inp.classList.add('number-right');
-      } else if (r.type==='currency'){
-        inp.inputMode='decimal';
-        inp.placeholder='0.00';
-        inp.classList.add('number-right');
-      } else {
-        inp.inputMode='text';
-      }
-
-      inp.addEventListener('input', computeTotals);
-      inp.addEventListener('keydown', gridKeydown);
-      if (r.computed){
-        inp.readOnly = true;
-        inp.classList.add('computed');
-        inp.tabIndex = -1;
-      }
-      if (r.type==='currency'){
-        const wrap=document.createElement('div');
-        wrap.className='currency-wrap';
-        wrap.appendChild(inp);
-        td.appendChild(wrap);
-      } else {
-        td.appendChild(inp);
-      }
-      tr.appendChild(td);
-    }
-
-    tbody.appendChild(tr);
-  });
-}
-
-
-function gridKeydown(e){
-  if (e.key !== 'Tab') return;
-  const inp = e.target;
-  if (!inp || !inp.dataset || !inp.dataset.col || !inp.dataset.row) return;
-  // Only override tabbing inside the entry grid (tbody inputs)
-  if (!el('entryTable').contains(inp)) return;
-
-  e.preventDefault();
-
-  const dir = e.shiftKey ? -1 : 1;
-  const col = inp.dataset.col;
-  const rowNum = Number(inp.dataset.row);
-
-  // Build ordered list of editable row numbers (skip dividers and computed-only rows)
-  const rowOrder = rows.filter(r=>r.type!=='divider').map(r=>r.row);
-  const idx = rowOrder.indexOf(rowNum);
-  if (idx === -1) return;
-
-  let nextIdx = idx + dir;
-  while (nextIdx >= 0 && nextIdx < rowOrder.length){
-    const nextRow = rowOrder[nextIdx];
-    const next = el('entryTable').querySelector(`tbody input[data-row="${nextRow}"][data-col="${col}"]`);
-    if (next && next.tabIndex !== -1 && !next.readOnly){
-      next.focus();
-      next.select?.();
-      return;
-    }
-    nextIdx += dir;
-  }
-
-  // If no next row, fall back to normal tab order outside the grid
-  // by focusing the next focusable element in the document.
-  const focusables = Array.from(document.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'))
-    .filter(n=>!n.disabled && n.offsetParent!==null);
-  const cur = focusables.indexOf(inp);
-  const nxt = focusables[cur + (dir>0?1:-1)];
-  if (nxt) nxt.focus();
-}
-
-function allInputs(){
-  return Array.from(el('entryTable').querySelectorAll('input'));
-}
-
-function clearInputs(opts = {}){
-  const {
-    resetSync = false,
-    resetDates = true,
-    resetWeekSelect = true,
-  } = opts;
-
-  // Clear all entry fields (does NOT delete cloud)
-  allInputs().forEach(i=>i.value='');
-  el('businessPurpose').value='';
-
-  if (resetDates){
-    el('sundayDate').value='';
-    el('weekEnding').value='';
-    currentWeekEnding = '';
-  }
-
-  if (resetSync){
-    currentSync = '';
-    renderSync();
-  }
-
-  if (resetWeekSelect){
-    const sel = el('weekSelect');
-    if (sel) sel.value = '';
-  }
-
-  computeTotals();
-  setStatus('Cleared.');
-}
-
-function recomputeDerived(){
-  // Personal Car Mileage (row 29) = Business miles (row 10) * MILEAGE_RATE
-  for (let i=0;i<7;i++){
-    const milesInp = el('entryTable').querySelector(`input[data-row="10"][data-col="${dayCols[i]}"]`);
-    const outInp   = el('entryTable').querySelector(`input[data-row="29"][data-col="${dayCols[i]}"]`);
-    if (!milesInp || !outInp) continue;
-    const n = Number((milesInp.value || '').trim());
-    if (!Number.isFinite(n) || n<=0){
-      outInp.value = '';
-    } else {
-      outInp.value = (n * MILEAGE_RATE).toFixed(2);
-    }
-  }
-}
-
-function computeTotals(){
-  recomputeDerived();
-  const totals=[0,0,0,0,0,0,0];
-  allInputs().forEach(inp=>{
-    if (inp.dataset.type!=='currency') return;
-    const v=inp.value.trim();
-    if (!v) return;
-    const n=Number(v);
-    if (!Number.isFinite(n)) return;
-    const idx=dayCols.indexOf(inp.dataset.col);
-    if (idx>=0) totals[idx]+=n;
-  });
-  let week=0;
-  totals.forEach((t,idx)=>{
-    week+=t;
-    const out = t ? ('$' + t.toFixed(2)) : '';
-    el(`tot${dayIds[idx]}`).value = out;
-  });
-  el('totWEEK').value = week ? ('$' + week.toFixed(2)) : '';
-}
-
-function serialize(){
-  const entries={};
-  allInputs().forEach(inp=>{
-    if (inp.dataset.computed==='true') return; // derived display only
-    const addr = `${inp.dataset.col}${inp.dataset.row}`;
-    const raw = inp.value;
-    if (raw==='') return;
-    if (inp.dataset.type==='number' || inp.dataset.type==='currency'){
-      const n=Number(raw);
-      if (!Number.isFinite(n)) return;
-      entries[addr]=n;
-    } else {
-      entries[addr]=raw;
-    }
-  });
-  return {
-    syncName: currentSync,
-    weekEnding: currentWeekEnding,
-    businessPurpose: el('businessPurpose').value || '',
-    entries
-  };
-}
-
-function applyData(data){
-  // When loading saved data, never reset sync/date; we set those explicitly.
-  clearInputs({ resetSync:false, resetDates:false, resetWeekSelect:false });
-  if (!data) return;
-  el('businessPurpose').value = data.businessPurpose || '';
-  const map = data.entries || {};
-  allInputs().forEach(inp=>{
-    const addr = `${inp.dataset.col}${inp.dataset.row}`;
-    if (map[addr]==null) return;
-    inp.value = String(map[addr]);
-  });
-  computeTotals();
-}
-
-async function apiFetchJson(url, opts={}){
-  const headers = opts.headers ? {...opts.headers} : {};
-  if (opts.body && !headers['Content-Type']) headers['Content-Type']='application/json';
-  const res = await fetch(url, {...opts, headers});
-  if (!res.ok){
-    const t = await res.text().catch(()=> '');
-    throw new Error(`${res.status} ${res.statusText}${t ? ' - '+t : ''}`);
-  }
-  return res.json();
-}
-
-async function refreshWeekDropdown(){
-  try{
-    if (!currentSync) {
-      // no sync -> just reset dropdown
-      const sel = el('weekSelect');
-      sel.innerHTML = '<option value="">(Select a week)</option>';
-      entryIndex = new Map();
-      return;
-    }
-
-    const out = await apiFetchJson(`${API.weeks}?sync=${encodeURIComponent(currentSync)}`);
-    let list = Array.isArray(out.entries) ? out.entries : [];
-    const sel = el('weekSelect');
-    const keep = sel.value;
-    sel.innerHTML = '<option value="">(Select a week)</option>';
-    entryIndex = new Map();
+function rebuildWeekSelectOptions(){
+  entryIndex = new Map();
     list.forEach(item=>{
       const we = (item && item.weekEnding) ? String(item.weekEnding) : '';
       const bp = (item && item.businessPurpose) ? String(item.businessPurpose) : '';
       const updatedAt = (item && item.updatedAt) ? String(item.updatedAt) : '';
       if (!we) return;
       entryIndex.set(we, { businessPurpose: bp, updatedAt });
-      const opt=document.createElement('option');
-      opt.value=we;
-      const base = safeFilenameBase(we, bp);
-      opt.textContent = `${fmtYYMMDD(parseISODate(we))} - ${base}`;
-      sel.appendChild(opt);
     });
+    rebuildWeekSelectOptions();
+    const sel = el('weekSelect');
     if (keep && entryIndex.has(keep)) sel.value=keep;
   } catch {
     // ignore
@@ -383,14 +86,22 @@ async function saveWeek(){
   if (!currentWeekEnding) { setStatus('Pick a Sunday date first.'); return; }
   setStatus('Saving…');
   try{
+    const payload = serialize();
     await apiFetchJson(`${API.data}?sync=${encodeURIComponent(currentSync)}&weekEnding=${encodeURIComponent(currentWeekEnding)}`, {
       method:'PUT',
-      body: JSON.stringify(serialize())
+      body: JSON.stringify(payload)
     });
-    setStatus('Saved.');
-    await refreshWeekDropdown();
-    // ensure selected
+
+    // Optimistically update dropdown immediately (KV list can be eventually consistent).
+    const bp = (el('businessPurpose')?.value || '').trim();
+    const updatedAt = new Date().toISOString();
+    entryIndex.set(currentWeekEnding, { businessPurpose: bp, updatedAt });
+    rebuildWeekSelectOptions(); // ensures newest-first ordering
     el('weekSelect').value = currentWeekEnding;
+
+    // Still refresh from server in the background to pick up any remote edits
+    refreshWeekDropdown().catch(()=>{});
+    setStatus('Saved.');
   } catch(e){
     setStatus(`Save failed: ${e?.message || e}`);
   }
@@ -553,7 +264,21 @@ async function downloadExcel(){
     // Leave template mileage rate in B10 to preserve formatting and any future changes.
     // setCellNumber('B10', MILEAGE_RATE);
 
-    const serializer = new XMLSerializer();
+    
+    // Personal Car Mileage: write cached values into row 29 so it appears even if Excel doesn't recalc immediately.
+    // We only export the MILES input row (10); the template retains formulas, but cached values make it robust.
+    const rate = MILEAGE_RATE;
+    let weekMileageTotal = 0;
+    for (let i=0;i<7;i++){
+      const milesAddr = `${dayCols[i]}10`;
+      const miles = Number(payload.entries?.[milesAddr] || 0);
+      const amt = Math.round((miles * rate) * 100) / 100;
+      weekMileageTotal += amt;
+      setCellNumber(`${dayCols[i]}29`, amt);
+    }
+    setCellNumber('J29', Math.round(weekMileageTotal*100)/100);
+
+const serializer = new XMLSerializer();
     zip.file(sheetPath, serializer.serializeToString(sheetDoc));
 
     const outBlob = await zip.generateAsync({type:'blob'});
