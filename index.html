@@ -10,7 +10,7 @@
   <header class="bar">
     <div class="bar-left">
       <div class="title">Weekly Expenses</div>
-      <div class="sub">Cloud-backed (KV) • Sync by Week Ending (Saturday)</div>
+      <div class="sub">Cloud-backed (KV) • Sync by name</div>
     </div>
     <div class="bar-right">
       <button id="btnDownload" class="primary" disabled>Download filled Excel</button>
@@ -39,19 +39,7 @@
         <span id="syncPill" class="pill">Not set</span>
         <button id="btnChangeSync" class="linkbtn" type="button">Change</button>
       </div>
-
-      <dialog id="syncDialog" class="dialog">
-        <form method="dialog" class="dialogForm">
-          <h3>Set Sync Name</h3>
-          <input id="syncInput" placeholder="type anything" autocomplete="off" />
-          <div class="dialogBtns">
-            <button id="btnSyncCancel" class="btn ghost" value="cancel" type="submit">Cancel</button>
-            <button id="btnSyncSave" class="btn primary" value="ok" type="submit">Save</button>
-          </div>
-        </form>
-      </dialog>
-
-      <div class="row">
+<div class="row">
         <button id="btnDeleteWeek" class="danger" disabled>Delete selected week</button>
       </div>
 
