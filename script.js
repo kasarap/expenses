@@ -435,6 +435,28 @@ async function downloadExcel(){
 
     if (zip.file('xl/calcChain.xml')) zip.remove('xl/calcChain.xml');
 
+
+    // Force Excel to recalculate formulas on open (ensures SUM and mileage formulas update)
+    const wbPath = 'xl/workbook.xml';
+    if (zip.file(wbPath)) {
+      let wbXml = await zip.file(wbPath).async('string');
+      // Ensure calcPr exists and set calcMode=auto and fullCalcOnLoad=1
+      if (wbXml.includes('<calcPr')) {
+        wbXml = wbXml.replace(/<calcPr([^>]*)>/, (m, attrs) => {
+          let a = attrs;
+          if (!/\bcalcMode=/.test(a)) a += ' calcMode="auto"';
+          a = a.replace(/calcMode="[^"]*"/, 'calcMode="auto"');
+          if (!/\bfullCalcOnLoad=/.test(a)) a += ' fullCalcOnLoad="1"';
+          a = a.replace(/fullCalcOnLoad="[^"]*"/, 'fullCalcOnLoad="1"');
+          return `<calcPr${a}>`;
+        });
+      } else {
+        // Insert calcPr under workbook root if missing
+        wbXml = wbXml.replace(/<workbook([^>]*)>/, `<workbook$1><calcPr calcMode="auto" fullCalcOnLoad="1"/>`);
+      }
+      zip.file(wbPath, wbXml);
+    }
+
     const sheetPath = 'xl/worksheets/sheet1.xml';
     const sheetXml = await zip.file(sheetPath).async('string');
     const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml');
