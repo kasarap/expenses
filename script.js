@@ -214,24 +214,39 @@ function allInputs(){
   return Array.from(el('entryTable').querySelectorAll('input'));
 }
 
-function clearInputs(){
-  // Clear all entry fields + dates (does NOT delete cloud)
+function clearInputs(opts = {}){
+  // Clear fields (does NOT delete cloud)
+  const {
+    resetSync = true,
+    resetWeekSelect = true,
+    resetDates = true,
+    resetBusinessPurpose = true,
+    silent = false
+  } = opts;
+
   allInputs().forEach(i=>i.value='');
-  el('businessPurpose').value='';
-  el('sundayDate').value='';
-  el('weekEnding').value='';
-  currentWeekEnding = null;
 
-  // Reset current sync so next Save prompts for a new Sync Name
-  currentSync = '';
-  renderSync();
+  if (resetBusinessPurpose) el('businessPurpose').value='';
+  if (resetDates){
+    el('sundayDate').value='';
+    el('weekEnding').value='';
+    currentWeekEnding = null;
+  }
 
-  // Reset dropdown selection
-  const sel = el('weekSelect');
-  if (sel) sel.value = '';
+  if (resetSync){
+    currentSync = '';
+    renderSync();
+  }
+
+  if (resetWeekSelect){
+    const sel = el('weekSelect');
+    if (sel) sel.value = '';
+  }
 
   computeTotals();
-  setStatus('Cleared. Enter a Sunday date (and set Sync Name on Save).');
+  if (!silent){
+    setStatus('Cleared. Enter a Sunday date (and set Sync Name on Save).');
+  }
 }
 
 function recomputeDerived(){
@@ -294,7 +309,8 @@ function serialize(){
 }
 
 function applyData(data){
-  clearInputs();
+  // Clear entry fields but keep current Sync selection
+  clearInputs({ resetSync:false, resetWeekSelect:false, resetDates:false, resetBusinessPurpose:false, silent:true });
   if (!data) return;
   el('businessPurpose').value = data.businessPurpose || '';
   const map = data.entries || {};
