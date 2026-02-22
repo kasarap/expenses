@@ -46,7 +46,7 @@ const rows = [
 let currentWeekEnding = ''; // YYYY-MM-DD
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
 let currentEntryId = (localStorage.getItem('expenses_entry_id') || '').trim();
-let entryIndex = new Map(); // sync -> {weekEnding}
+let entryIndex = new Map(); // id -> { weekEnding, syncName, businessPurpose, updatedAt }
 
 function safeFilenameBase(weekEndingISO, businessPurpose){
   // Matches the export filename base but without the .xlsx extension.
@@ -333,99 +333,115 @@ async function apiFetchJson(url, opts={}){
 async function refreshWeekDropdown(){
   try{
     const out = await apiFetchJson(API.weeks);
-    let list = Array.isArray(out.entries) ? out.entries : [];
+    const list = Array.isArray(out.entries) ? out.entries : [];
     const sel = el('weekSelect');
-    const keep = sel.value;
+    const keep = sel.value || currentEntryId;
+
     sel.innerHTML = '<option value="">(Select a week)</option>';
     entryIndex = new Map();
+
     list.forEach(item=>{
       const id = (item && item.id) ? String(item.id) : '';
       if (!id) return;
-      const sync = (item && item.sync) ? String(item.sync) : '';
+
       const we = (item && item.weekEnding) ? String(item.weekEnding) : '';
+      const syncName = (item && item.syncName) ? String(item.syncName) : '';
       const bp = (item && item.businessPurpose) ? String(item.businessPurpose) : '';
       const updatedAt = (item && item.updatedAt) ? String(item.updatedAt) : '';
-      entryIndex.set(id, { weekEnding: we, businessPurpose: bp, updatedAt, sync });
-      const opt=document.createElement('option');
-      opt.value=id;
-      const labelWE = we || (sync.match(/^\d{4}-\d{2}-\d{2}$/) ? sync : '');
-      if (labelWE){
-        const base = safeFilenameBase(labelWE, bp);
-        opt.textContent = `${fmtYYMMDD(parseISODate(labelWE))} - ${base}`;
+
+      entryIndex.set(id, { weekEnding: we, syncName, businessPurpose: bp, updatedAt });
+
+      const opt = document.createElement('option');
+      opt.value = id;
+      if (we){
+        const base = safeFilenameBase(we, bp);
+        opt.textContent = `${fmtYYMMDD(parseISODate(we))} - ${base}`;
       } else {
-        opt.textContent = sync;
+        opt.textContent = id;
       }
       sel.appendChild(opt);
     });
-    if (keep && entryIndex.has(keep)) sel.value=keep;
-  } catch {
-    // ignore
+
+    if (keep && entryIndex.has(keep)){
+      sel.value = keep;
+      currentEntryId = keep;
+      localStorage.setItem('expenses_entry_id', currentEntryId);
+    } else {
+      currentEntryId = '';
+      localStorage.removeItem('expenses_entry_id');
+    }
+  } catch (e) {
+    console.warn('refreshWeekDropdown failed', e);
   }
 }
 
 async function loadWeek(){
-  const id = (currentEntryId || '').trim();
-  if (!id) return;
+  if (!currentEntryId) return;
   setStatus('Loading…');
   try{
-    const out = await apiFetchJson(`${API.data}?id=${encodeURIComponent(id)}`);
+    const out = await apiFetchJson(`${API.data}?id=${encodeURIComponent(currentEntryId)}`);
     applyData(out.data);
+    if (out.data && typeof out.data.syncName === 'string' && out.data.syncName.trim()) {
+      currentSync = out.data.syncName.trim();
+      renderSync();
+    }
     if (out.data && typeof out.data.weekEnding === 'string' && out.data.weekEnding){
       currentWeekEnding = out.data.weekEnding;
       el('weekEnding').value = currentWeekEnding;
-      el('sundayDate').value = toISODate(computeSundayFromWeekEnding(currentWeekEnding));
+el('sundayDate').value = toISODate(computeSundayFromWeekEnding(currentWeekEnding));
       setButtonsEnabled();
     }
-    setStatus(out.data ? 'Loaded.' : 'No saved data (new entry).');
+    setStatus(out.data ? 'Loaded.' : 'No saved data (new week).');
   } catch(e){
     setStatus('Load failed.');
   }
 }
 
 async function saveWeek(){
-  if (!ensureSync()) return;
-  const weekEnding = (el('weekEnding').value || '').trim();
-  if (!weekEnding){
-    setStatus('Enter the Sunday date first.');
+  if (!currentWeekEnding){
+    setStatus('Enter a Sunday date first.');
     return;
   }
-  currentEntryId = makeEntryId(weekEnding, currentSync);
+  if (!ensureSync()) return;
+
+  // Unique record id per week + sync name (prevents overwriting previous weeks)
+  currentEntryId = `${currentWeekEnding}__${currentSync}`;
   localStorage.setItem('expenses_entry_id', currentEntryId);
 
   setStatus('Saving…');
   try{
+    const payload = serialize();
+    payload.syncName = currentSync;
+
     await apiFetchJson(`${API.data}?id=${encodeURIComponent(currentEntryId)}`, {
       method:'PUT',
-      body: JSON.stringify(serialize())
+      body: JSON.stringify(payload)
     });
+
     setStatus('Saved.');
     await refreshWeekDropdown();
     el('weekSelect').value = currentEntryId;
+    setButtonsEnabled();
   } catch(e){
-    setStatus('Save failed.');
+    setStatus(`Save failed: ${e?.message || e}`);
   }
 }
 
 async function deleteWeek(){
-  const id = (el('weekSelect').value || currentEntryId || '').trim();
-  if (!id) return;
-  const parts = parseEntryId(id);
-  const labelWE = parts.weekEnding ? fmtYYMMDD(parseISODate(parts.weekEnding)) : '';
-  const label = labelWE ? `${labelWE} - ${parts.sync}` : parts.sync;
+  if (!currentEntryId) return;
+  const label = currentWeekEnding ? weekLabelWithPrefix(currentWeekEnding) : currentSync;
   if (!confirm(`Delete saved data for ${label}?`)) return;
-
   setStatus('Deleting…');
   try{
-    await apiFetchJson(`${API.data}?id=${encodeURIComponent(id)}`, {method:'DELETE'});
-    // if we deleted the currently loaded entry, clear form
-    if (id === currentEntryId){
-      clearInputs({ resetSync:false, resetWeekSelect:true, resetDates:true });
-      currentEntryId = '';
-      localStorage.removeItem('expenses_entry_id');
-    }
+    await apiFetchJson(`${API.data}?id=${encodeURIComponent(currentEntryId)}`, {method:'DELETE'});
+    clearInputs();
     setStatus('Deleted.');
     await refreshWeekDropdown();
-  } catch(e){
+    el('weekSelect').value='';
+    currentEntryId='';
+    localStorage.removeItem('expenses_entry_id');
+    setButtonsEnabled();
+  } catch{
     setStatus('Delete failed.');
   }
 }
@@ -660,27 +676,29 @@ el('sundayDate').addEventListener('change', ()=>{
 
 
 el('weekSelect').addEventListener('change', async ()=>{
-  const id = (el('weekSelect').value || '').trim();
-  if (!id) return;
+  const v = el('weekSelect').value;
+  if (!v) return;
 
-  currentEntryId = id;
+  currentEntryId = v;
   localStorage.setItem('expenses_entry_id', currentEntryId);
 
-  const parts = parseEntryId(id);
-  currentSync = parts.sync || '';
-  localStorage.setItem('expenses_sync_name', currentSync);
-  renderSync();
+  const meta = entryIndex.get(v) || {};
+  if (meta.syncName){
+    currentSync = meta.syncName;
+    renderSync();
+  }
 
-  const meta = entryIndex.get(id);
-  const we = (meta && meta.weekEnding) ? meta.weekEnding : parts.weekEnding;
+  const we = meta.weekEnding || '';
   if (we){
     currentWeekEnding = we;
     el('weekEnding').value = we;
     el('sundayDate').value = toISODate(computeSundayFromWeekEnding(we));
   }
+
   await loadWeek();
   setButtonsEnabled();
 });
+
 
 el('btnSave').addEventListener('click', saveWeek);
 el('btnDeleteWeek').addEventListener('click', deleteWeek);
@@ -707,29 +725,32 @@ el('btnDownload').addEventListener('click', downloadExcel);
     const s = sanitizeSyncName(v || '');
     if (!s) return;
     currentSync = s;
-    localStorage.setItem('expenses_sync_name', currentSync);
-    // Changing sync starts a new entry id on next save
-    currentEntryId = '';
-    localStorage.removeItem('expenses_entry_id');
     renderSync();
+    // If an entry exists for this week + sync, select it
+    const guess = currentWeekEnding ? `${currentWeekEnding}__${currentSync}` : '';
+    if (guess && entryIndex.has(guess)) {
+      currentEntryId = guess;
+      localStorage.setItem('expenses_entry_id', currentEntryId);
+      el('weekSelect').value = currentEntryId;
+    }
     setButtonsEnabled();
   });
 
   refreshWeekDropdown().then(async ()=>{
-    // On page load, automatically select and load the most recently edited entry (top of dropdown)
+    // On page load, automatically select and load the newest week (top of dropdown)
     const sel = el('weekSelect');
     const firstReal = Array.from(sel.options).find(o=>o.value);
     if (firstReal){
       currentEntryId = firstReal.value;
       localStorage.setItem('expenses_entry_id', currentEntryId);
-      const parts = parseEntryId(currentEntryId);
-      currentSync = parts.sync || '';
-      localStorage.setItem('expenses_sync_name', currentSync);
-      renderSync();
       sel.value = currentEntryId;
 
-      const meta = entryIndex.get(currentEntryId);
-      const we = (meta && meta.weekEnding) ? meta.weekEnding : parts.weekEnding;
+      const meta = entryIndex.get(currentEntryId) || {};
+      if (meta.syncName){
+        currentSync = meta.syncName;
+        renderSync();
+      }
+      const we = meta.weekEnding || '';
       if (we){
         currentWeekEnding = we;
         el('weekEnding').value = we;
@@ -738,6 +759,7 @@ el('btnDownload').addEventListener('click', downloadExcel);
       await loadWeek();
     }
     setButtonsEnabled();
+  });
   });
 
   setButtonsEnabled();
@@ -751,7 +773,7 @@ function setButtonsEnabled(){
   el('btnClear').disabled = !hasWeek;
   el('btnDownload').disabled = !hasWeek;
   // Delete only if this sync exists in KV list (so we don't delete an unsaved draft)
-  el('btnDeleteWeek').disabled = !((el('weekSelect').value||currentEntryId) && entryIndex.has((el('weekSelect').value||currentEntryId)));
+  el('btnDeleteWeek').disabled = !(!!currentEntryId && entryIndex.has(currentEntryId));
 }
 function sanitizeSyncName(s){
   if (!s) return '';
@@ -771,22 +793,9 @@ function ensureSync(){
     return false;
   }
   currentSync = s;
-  localStorage.setItem('expenses_sync_name', currentSync);
-  // entry id will be derived on save (needs week ending)
   renderSync();
   setButtonsEnabled();
   return true;
-}
-
-function makeEntryId(weekEnding, sync){
-  return `${weekEnding}__${sync}`;
-}
-
-function parseEntryId(id){
-  const s = String(id||'');
-  const idx = s.indexOf('__');
-  if (idx === -1) return { weekEnding:'', sync:s };
-  return { weekEnding: s.slice(0, idx), sync: s.slice(idx+2) };
 }
 
 
