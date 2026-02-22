@@ -432,8 +432,11 @@ async function downloadExcel(){
     }
     function fmtMDY(d){ return `${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`; }
 
+    // Header fields: fill week-ending and business purpose into E5 and H5.
+    // Also write E4 for compatibility with any unmerged variants.
     setCellStringInline('E4', fmtMDY(sat));
-    setCellStringInline('G4', bp);
+    setCellStringInline('E5', fmtMDY(sat));
+    setCellStringInline('H5', bp);
 
     for (let i=0;i<7;i++){
       const d = new Date(sun);
