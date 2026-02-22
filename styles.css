@@ -50,3 +50,10 @@ td input{width:100%;min-width:90px;padding:8px;border-radius:8px}
 .currency-wrap::before{content:'$';position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:12px;pointer-events:none;}
 .currency-wrap input{padding-left:22px;text-align:right;}
 .number-right{text-align:right;}
+
+/* Section dividers inside the table */
+.divider-row td{border-bottom:none;padding:0}
+.divider-cell{height:10px;background:linear-gradient(to right, rgba(255,255,255,.10), rgba(255,255,255,0));border-top:1px solid rgba(255,255,255,.10)}
+
+/* Derived/read-only cells */
+input.computed{opacity:.85}

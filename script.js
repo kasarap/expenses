@@ -7,11 +7,25 @@ const el = (id) => document.getElementById(id);
 const dayCols = ['C','D','E','F','G','H','I']; // Sun..Sat
 const dayIds  = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
 
+// Template mileage rate is stored in B10 (seen in the provided Excel template)
+// Used to *display* Personal Car Mileage (row 29) as a derived value.
+const MILEAGE_RATE = 0.7; // dollars per mile
+
+// Rows you can edit (per your list) plus a derived display row for Personal Car Mileage (row 29).
+// Also re-ordered: meals directly under Personal Car Mileage.
 const rows = [
   {row:8,  label:'FROM',                   type:'text'},
   {row:9,  label:'TO',                     type:'text'},
   {row:10, label:'BUSINESS MILES DRIVEN',  type:'number'},
+  {row:29, label:`Personal Car Mileage ($${MILEAGE_RATE.toFixed(2)}/mi)`, type:'currency', computed:true},
+  {type:'divider'},
 
+  {row:42, label:'Breakfast', type:'currency'},
+  {row:43, label:'Lunch', type:'currency'},
+  {row:44, label:'Dinner', type:'currency'},
+  {type:'divider'},
+
+  // Airfare above Auto Rental
   {row:18, label:'Airfare', type:'currency'},
   {row:19, label:'Bus, Limo & Taxi', type:'currency'},
   {row:20, label:'Lodging Room & Tax', type:'currency'},
@@ -21,15 +35,12 @@ const rows = [
 
   {row:25, label:'Auto Rental', type:'currency'},
   {row:26, label:'Auto Rental Fuel', type:'currency'},
+  {type:'divider'},
 
   {row:34, label:'Internet - Email', type:'currency'},
   {row:36, label:'POSTAGE', type:'currency'},
   {row:38, label:'PERISHABLE TOOLS', type:'currency'},
   {row:39, label:'DUES & SUBSCRIPTIONS', type:'currency'},
-
-  {row:42, label:'Breakfast', type:'currency'},
-  {row:43, label:'Lunch', type:'currency'},
-  {row:44, label:'Dinner', type:'currency'},
 ];
 
 let currentWeekEnding = ''; // YYYY-MM-DD
@@ -73,6 +84,16 @@ function buildTable(){
   const tbody = el('entryTable').querySelector('tbody');
   tbody.innerHTML = '';
   rows.forEach(r=>{
+    if (r.type === 'divider'){
+      const tr=document.createElement('tr');
+      tr.className='divider-row';
+      const td=document.createElement('td');
+      td.colSpan = 8;
+      td.className='divider-cell';
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+      return;
+    }
     const tr=document.createElement('tr');
 
     const tdLabel=document.createElement('td');
@@ -87,6 +108,7 @@ function buildTable(){
       inp.dataset.row=String(r.row);
       inp.dataset.col=dayCols[i];
       inp.dataset.type=r.type;
+      if (r.computed) inp.dataset.computed='true';
 
       if (r.type==='number'){
         inp.inputMode='numeric';
@@ -101,6 +123,11 @@ function buildTable(){
       }
 
       inp.addEventListener('input', computeTotals);
+      if (r.computed){
+        inp.readOnly = true;
+        inp.classList.add('computed');
+        inp.tabIndex = -1;
+      }
       if (r.type==='currency'){
         const wrap=document.createElement('div');
         wrap.className='currency-wrap';
@@ -126,7 +153,23 @@ function clearInputs(){
   computeTotals();
 }
 
+function recomputeDerived(){
+  // Personal Car Mileage (row 29) = Business miles (row 10) * MILEAGE_RATE
+  for (let i=0;i<7;i++){
+    const milesInp = el('entryTable').querySelector(`input[data-row="10"][data-col="${dayCols[i]}"]`);
+    const outInp   = el('entryTable').querySelector(`input[data-row="29"][data-col="${dayCols[i]}"]`);
+    if (!milesInp || !outInp) continue;
+    const n = Number((milesInp.value || '').trim());
+    if (!Number.isFinite(n) || n<=0){
+      outInp.value = '';
+    } else {
+      outInp.value = (n * MILEAGE_RATE).toFixed(2);
+    }
+  }
+}
+
 function computeTotals(){
+  recomputeDerived();
   const totals=[0,0,0,0,0,0,0];
   allInputs().forEach(inp=>{
     if (inp.dataset.type!=='currency') return;
@@ -149,6 +192,7 @@ function computeTotals(){
 function serialize(){
   const entries={};
   allInputs().forEach(inp=>{
+    if (inp.dataset.computed==='true') return; // derived display only
     const addr = `${inp.dataset.col}${inp.dataset.row}`;
     const raw = inp.value;
     if (raw==='') return;
@@ -258,7 +302,8 @@ async function downloadExcel(){
   if (!currentWeekEnding) return;
   setStatus('Building Excel…');
   try{
-    const templateRes = await fetch('Expenses Form.xlsx', {cache:'no-store'});
+    const templateRes = await fetch('Expenses%20Form.xlsx', {cache:'no-store'});
+    if (!templateRes.ok) throw new Error('Template not found');
     const buf = await templateRes.arrayBuffer();
     const wb = XLSX.read(buf, {type:'array'});
     const ws = wb.Sheets['Page 1'] || wb.Sheets[wb.SheetNames[0]];
@@ -284,6 +329,9 @@ async function downloadExcel(){
       if (typeof val === 'number') ws[addr] = {t:'n', v: val};
       else ws[addr] = {t:'s', v: String(val)};
     }
+
+    // Ensure mileage rate cell matches UI constant (B10)
+    ws['B10'] = {t:'n', v: MILEAGE_RATE};
 
     // Filename: Week m-d through m-d - Business Purpose.xlsx
     const mdSun = fmtMD(sun);
