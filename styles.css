@@ -28,9 +28,8 @@ button.danger{background:#2a1212;border-color:#5a1f1f;color:#ffd1d1}
 table{width:100%;border-collapse:separate;border-spacing:0;min-width:860px}
 th,td{border-bottom:1px solid var(--line);padding:8px 8px;font-size:12px;vertical-align:middle}
 thead th{position:sticky;top:0;background:#0e1218;z-index:2}
-th.sticky{left:0;z-index:3;position:sticky;background:#0e1218}
-th.sticky2, td.sticky2{left:70px;z-index:3;position:sticky;background:#0e1218}
-td.sticky2{background:#0c1016}
+th.stickyLabel, td.stickyLabel{left:0;z-index:3;position:sticky;background:#0e1218}
+td.stickyLabel{background:#0c1016}
 td input{width:100%;min-width:90px;padding:8px;border-radius:8px}
 
 .totals{margin-top:12px;border:1px solid var(--line);border-radius:12px;padding:10px;background:#0c1016}
@@ -45,3 +44,9 @@ td input{width:100%;min-width:90px;padding:8px;border-radius:8px}
   .grid3{grid-template-columns:1fr}
   .grid2{grid-template-columns:1fr}
 }
+
+/* Currency input */
+.currency-wrap{position:relative;}
+.currency-wrap::before{content:'$';position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:12px;pointer-events:none;}
+.currency-wrap input{padding-left:22px;text-align:right;}
+.number-right{text-align:right;}

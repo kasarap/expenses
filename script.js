@@ -12,24 +12,24 @@ const rows = [
   {row:9,  label:'TO',                     type:'text'},
   {row:10, label:'BUSINESS MILES DRIVEN',  type:'number'},
 
-  {row:18, label:'Airfare',                type:'number'},
-  {row:19, label:'Bus, Limo & Taxi',       type:'number'},
-  {row:20, label:'Lodging Room & Tax',     type:'number'},
-  {row:21, label:'Parking / Tolls',        type:'number'},
-  {row:22, label:'Tips',                   type:'number'},
-  {row:23, label:'Laundry',                type:'number'},
+  {row:18, label:'Airfare', type:'currency'},
+  {row:19, label:'Bus, Limo & Taxi', type:'currency'},
+  {row:20, label:'Lodging Room & Tax', type:'currency'},
+  {row:21, label:'Parking / Tolls', type:'currency'},
+  {row:22, label:'Tips', type:'currency'},
+  {row:23, label:'Laundry', type:'currency'},
 
-  {row:25, label:'Auto Rental',            type:'number'},
-  {row:26, label:'Auto Rental Fuel',       type:'number'},
+  {row:25, label:'Auto Rental', type:'currency'},
+  {row:26, label:'Auto Rental Fuel', type:'currency'},
 
-  {row:34, label:'Internet - Email',       type:'number'},
-  {row:36, label:'POSTAGE',                type:'number'},
-  {row:38, label:'PERISHABLE TOOLS',       type:'number'},
-  {row:39, label:'DUES & SUBSCRIPTIONS',   type:'number'},
+  {row:34, label:'Internet - Email', type:'currency'},
+  {row:36, label:'POSTAGE', type:'currency'},
+  {row:38, label:'PERISHABLE TOOLS', type:'currency'},
+  {row:39, label:'DUES & SUBSCRIPTIONS', type:'currency'},
 
-  {row:42, label:'Breakfast',              type:'number'},
-  {row:43, label:'Lunch',                  type:'number'},
-  {row:44, label:'Dinner',                 type:'number'},
+  {row:42, label:'Breakfast', type:'currency'},
+  {row:43, label:'Lunch', type:'currency'},
+  {row:44, label:'Dinner', type:'currency'},
 ];
 
 let currentWeekEnding = ''; // YYYY-MM-DD
@@ -75,15 +75,10 @@ function buildTable(){
   rows.forEach(r=>{
     const tr=document.createElement('tr');
 
-    const tdRow=document.createElement('td');
-    tdRow.className='sticky';
-    tdRow.textContent=r.row;
-
     const tdLabel=document.createElement('td');
-    tdLabel.className='sticky2';
+    tdLabel.className='stickyLabel';
     tdLabel.textContent=r.label;
 
-    tr.appendChild(tdRow);
     tr.appendChild(tdLabel);
 
     for (let i=0;i<7;i++){
@@ -94,14 +89,26 @@ function buildTable(){
       inp.dataset.type=r.type;
 
       if (r.type==='number'){
-        inp.inputMode='decimal';
+        inp.inputMode='numeric';
         inp.placeholder='0';
+        inp.classList.add('number-right');
+      } else if (r.type==='currency'){
+        inp.inputMode='decimal';
+        inp.placeholder='0.00';
+        inp.classList.add('number-right');
       } else {
         inp.inputMode='text';
       }
 
       inp.addEventListener('input', computeTotals);
-      td.appendChild(inp);
+      if (r.type==='currency'){
+        const wrap=document.createElement('div');
+        wrap.className='currency-wrap';
+        wrap.appendChild(inp);
+        td.appendChild(wrap);
+      } else {
+        td.appendChild(inp);
+      }
       tr.appendChild(td);
     }
 
@@ -122,7 +129,7 @@ function clearInputs(){
 function computeTotals(){
   const totals=[0,0,0,0,0,0,0];
   allInputs().forEach(inp=>{
-    if (inp.dataset.type!=='number') return;
+    if (inp.dataset.type!=='currency') return;
     const v=inp.value.trim();
     if (!v) return;
     const n=Number(v);
@@ -133,7 +140,7 @@ function computeTotals(){
   let week=0;
   totals.forEach((t,idx)=>{
     week+=t;
-    const out = t ? t.toFixed(2).replace(/\.00$/,'') : '';
+    const out = t ? ('$' + t.toFixed(2)),'') : '';
     el(`tot${dayIds[idx]}`).value = out;
   });
   el('totWEEK').value = week ? week.toFixed(2).replace(/\.00$/,'') : '';
@@ -145,7 +152,7 @@ function serialize(){
     const addr = `${inp.dataset.col}${inp.dataset.row}`;
     const raw = inp.value;
     if (raw==='') return;
-    if (inp.dataset.type==='number'){
+    if (inp.dataset.type==='number' || inp.dataset.type==='currency'){
       const n=Number(raw);
       if (!Number.isFinite(n)) return;
       entries[addr]=n;
