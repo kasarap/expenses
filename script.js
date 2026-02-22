@@ -108,7 +108,7 @@ function buildTable(){
       inp.dataset.row=String(r.row);
       inp.dataset.col=dayCols[i];
       inp.dataset.type=r.type;
-      if (r.computed) inp.dataset.computed='true';
+      if (r.computed) { inp.dataset.computed='true'; inp.readOnly = true; inp.tabIndex = -1; }
 
       if (r.type==='number'){
         inp.inputMode='numeric';
@@ -123,6 +123,7 @@ function buildTable(){
       }
 
       inp.addEventListener('input', computeTotals);
+      inp.addEventListener('keydown', gridKeydown);
       if (r.computed){
         inp.readOnly = true;
         inp.classList.add('computed');
@@ -141,6 +142,46 @@ function buildTable(){
 
     tbody.appendChild(tr);
   });
+}
+
+
+function gridKeydown(e){
+  if (e.key !== 'Tab') return;
+  const inp = e.target;
+  if (!inp || !inp.dataset || !inp.dataset.col || !inp.dataset.row) return;
+  // Only override tabbing inside the entry grid (tbody inputs)
+  if (!el('entryTable').contains(inp)) return;
+
+  e.preventDefault();
+
+  const dir = e.shiftKey ? -1 : 1;
+  const col = inp.dataset.col;
+  const rowNum = Number(inp.dataset.row);
+
+  // Build ordered list of editable row numbers (skip dividers and computed-only rows)
+  const rowOrder = rows.filter(r=>r.type!=='divider').map(r=>r.row);
+  const idx = rowOrder.indexOf(rowNum);
+  if (idx === -1) return;
+
+  let nextIdx = idx + dir;
+  while (nextIdx >= 0 && nextIdx < rowOrder.length){
+    const nextRow = rowOrder[nextIdx];
+    const next = el('entryTable').querySelector(`tbody input[data-row="${nextRow}"][data-col="${col}"]`);
+    if (next && next.tabIndex !== -1 && !next.readOnly){
+      next.focus();
+      next.select?.();
+      return;
+    }
+    nextIdx += dir;
+  }
+
+  // If no next row, fall back to normal tab order outside the grid
+  // by focusing the next focusable element in the document.
+  const focusables = Array.from(document.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'))
+    .filter(n=>!n.disabled && n.offsetParent!==null);
+  const cur = focusables.indexOf(inp);
+  const nxt = focusables[cur + (dir>0?1:-1)];
+  if (nxt) nxt.focus();
 }
 
 function allInputs(){
@@ -337,9 +378,18 @@ async function downloadExcel(){
     const mdSun = fmtMD(sun);
     const mdSat = fmtMD(sat);
     const safeBp = (bp || 'Expenses').replace(/[\\/:*?"<>|]+/g,'').trim();
-    XLSX.writeFile(wb, `Week ${mdSun} through ${mdSat} - ${safeBp}.xlsx`);
+    const out = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+    const blob = new Blob([out], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `Week ${mdSun} through ${mdSat} - ${safeBp}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
     setStatus('Excel downloaded.');
-  } catch {
+  } catch (err) {
+    console.error(err);
     setStatus('Excel export failed.');
   }
 }

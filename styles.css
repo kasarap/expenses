@@ -57,3 +57,9 @@ td input{width:100%;min-width:90px;padding:8px;border-radius:8px}
 
 /* Derived/read-only cells */
 input.computed{opacity:.85}
+
+
+/* Week total on its own row */
+.totals-row-week{margin-top:10px;}
+.totals-row-week .totals-label{opacity:0;}
+.totals-row-week .totals-week{margin-left:auto;}
