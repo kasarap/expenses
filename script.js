@@ -214,38 +214,25 @@ function allInputs(){
   return Array.from(el('entryTable').querySelectorAll('input'));
 }
 
-function clearInputs(opts = {}){
-  // Clear on-screen fields (does NOT delete cloud unless you use Delete)
-  const { resetSync = true, resetWeekSelect = true, resetDates = true } = opts;
+function clearInputs(){
+  // Clear all entry fields + dates (does NOT delete cloud)
+  allInputs().forEach(i=>i.value='');
+  el('businessPurpose').value='';
+  el('sundayDate').value='';
+  el('weekEnding').value='';
+  currentWeekEnding = null;
 
-  allInputs().forEach(i => i.value = '');
-  el('businessPurpose').value = '';
+  // Reset current sync so next Save prompts for a new Sync Name
+  currentSync = '';
+  renderSync();
 
-  if (resetDates){
-    el('sundayDate').value = '';
-    el('weekEnding').value = '';
-    currentWeekEnding = null;
-  }
-
-  if (resetSync){
-    // Reset current sync so next Save prompts for a new Sync Name
-    currentSync = '';
-    renderSync();
-  }
-
-  if (resetWeekSelect){
-    const sel = el('weekSelect');
-    if (sel) sel.value = '';
-  }
+  // Reset dropdown selection
+  const sel = el('weekSelect');
+  if (sel) sel.value = '';
 
   computeTotals();
-  if (resetDates){
-    setStatus('Cleared. Enter a Sunday date (and set Sync Name on Save).');
-  } else {
-    setStatus('');
-  }
+  setStatus('Cleared. Enter a Sunday date (and set Sync Name on Save).');
 }
-
 
 function recomputeDerived(){
   // Personal Car Mileage (row 29) = Business miles (row 10) * MILEAGE_RATE
@@ -307,7 +294,7 @@ function serialize(){
 }
 
 function applyData(data){
-  clearInputs({ resetSync: false, resetWeekSelect: false, resetDates: false });
+  clearInputs();
   if (!data) return;
   el('businessPurpose').value = data.businessPurpose || '';
   const map = data.entries || {};
@@ -520,6 +507,32 @@ async function downloadExcel(){
       v.textContent = String(num);
       cell.appendChild(v);
     }
+
+    function getCellNumber(ref){
+      const cell = findCell(ref);
+      if (!cell) return null;
+      const v = cell.getElementsByTagName('v')[0];
+      if (!v) return null;
+      const n = Number(v.textContent);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    // For cells that already contain a formula (<f>), preserve the formula and
+    // only update the cached value (<v>) so the number shows even if the viewer
+    // doesn't recalculate immediately.
+    function setFormulaCachedValue(ref, num){
+      const cell = ensureCell(ref);
+      const f = cell.getElementsByTagName('f')[0];
+      if (!f) return setCellNumber(ref, num);
+
+      // Remove existing <v> (but keep <f>)
+      const vs = Array.from(cell.getElementsByTagName('v'));
+      vs.forEach(n=>n.parentNode.removeChild(n));
+
+      const v = sheetDoc.createElementNS(xmlNS,'v');
+      v.textContent = String(num);
+      cell.appendChild(v);
+    }
     function setCellStringInline(ref, str){
       const cell = ensureCell(ref);
       cell.setAttribute('t','inlineStr');
@@ -550,6 +563,19 @@ async function downloadExcel(){
       if (typeof val === 'number') setCellNumber(addr, val);
       else setCellStringInline(addr, String(val));
     }
+
+    // Make Personal Car Mileage (row 29) visible even without recalculation.
+    // Preserve the existing formulas; only update cached values.
+    const mileageRate = getCellNumber('B10') ?? MILEAGE_RATE;
+    let mileageWeekTotal = 0;
+    for (let i=0;i<7;i++){
+      const milesVal = payload.entries?.[`${dayCols[i]}10`];
+      const miles = typeof milesVal === 'number' ? milesVal : Number(milesVal);
+      const amt = (Number.isFinite(miles) ? miles : 0) * mileageRate;
+      mileageWeekTotal += amt;
+      setFormulaCachedValue(`${dayCols[i]}29`, amt ? amt : 0);
+    }
+    setFormulaCachedValue('J29', mileageWeekTotal ? mileageWeekTotal : 0);
 
     // Leave template mileage rate in B10 to preserve formatting and any future changes.
     // setCellNumber('B10', MILEAGE_RATE);
