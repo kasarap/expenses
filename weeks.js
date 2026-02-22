@@ -10,14 +10,8 @@ export async function onRequest(context) {
   const kv = env.EXPENSES_KV;
   if (!kv) return json({ error: 'Missing KV binding EXPENSES_KV' }, 500);
 
-  // Paginate through KV list (Cloudflare KV may return a cursor)
-  let cursor = undefined;
-  const keys = [];
-  do {
-    const list = await kv.list({ prefix: 'expenses:', cursor });
-    (list.keys || []).forEach(k => keys.push(k.name.replace(/^expenses:/,'')));
-    cursor = list.list_complete ? undefined : list.cursor;
-  } while (cursor);
+  const list = await kv.list({ prefix: 'expenses:' });
+  const keys = (list.keys || []).map(k => k.name.replace(/^expenses:/,''));
 
   // Pull metadata from each record so we can sort by most recently edited.
   const entries = [];

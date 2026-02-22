@@ -214,36 +214,39 @@ function allInputs(){
   return Array.from(el('entryTable').querySelectorAll('input'));
 }
 
-function clearInputs(opts = {}){
-  // Clear all entry fields (does NOT delete cloud)
-  const {
-    resetSync = true,
-    resetWeekSelect = true,
-    resetDates = true,
-  } = opts;
-
+function clearInputs(){
+  // Clear all entry fields + dates (does NOT delete cloud)
   allInputs().forEach(i=>i.value='');
   el('businessPurpose').value='';
+  el('sundayDate').value='';
+  el('weekEnding').value='';
+  currentWeekEnding = null;
 
-  if (resetDates){
-    el('sundayDate').value='';
-    el('weekEnding').value='';
-    currentWeekEnding = null;
-  }
+  // Reset current sync so next Save prompts for a new Sync Name
+  currentSync = '';
+  renderSync();
 
-  if (resetSync){
-    // Reset current sync so next Save prompts for a new Sync Name
-    currentSync = '';
-    renderSync();
-  }
-
-  if (resetWeekSelect){
-    const sel = el('weekSelect');
-    if (sel) sel.value = '';
-  }
+  // Reset dropdown selection
+  const sel = el('weekSelect');
+  if (sel) sel.value = '';
 
   computeTotals();
-  setStatus('Cleared (not deleted).');
+  setStatus('Cleared. Enter a Sunday date (and set Sync Name on Save).');
+}
+
+function recomputeDerived(){
+  // Personal Car Mileage (row 29) = Business miles (row 10) * MILEAGE_RATE
+  for (let i=0;i<7;i++){
+    const milesInp = el('entryTable').querySelector(`input[data-row="10"][data-col="${dayCols[i]}"]`);
+    const outInp   = el('entryTable').querySelector(`input[data-row="29"][data-col="${dayCols[i]}"]`);
+    if (!milesInp || !outInp) continue;
+    const n = Number((milesInp.value || '').trim());
+    if (!Number.isFinite(n) || n<=0){
+      outInp.value = '';
+    } else {
+      outInp.value = (n * MILEAGE_RATE).toFixed(2);
+    }
+  }
 }
 
 function computeTotals(){
@@ -291,7 +294,7 @@ function serialize(){
 }
 
 function applyData(data){
-  clearInputs({ resetSync: false, resetWeekSelect: false, resetDates: false });
+  clearInputs();
   if (!data) return;
   el('businessPurpose').value = data.businessPurpose || '';
   const map = data.entries || {};
@@ -610,15 +613,6 @@ function setWeekFromSunday(sundayISO){
 el('sundayDate').addEventListener('change', ()=>{
   const v = el('sundayDate').value;
   if (!v) return;
-
-  const newWE = toISODate(computeWeekEndingFromSunday(v));
-  const changed = !!(currentWeekEnding && newWE && newWE !== currentWeekEnding);
-
-  // If user picks a new Sunday/week, start a fresh entry automatically.
-  if (changed){
-    clearInputs({ resetSync: true, resetWeekSelect: true, resetDates: false });
-  }
-
   setWeekFromSunday(v);
   setButtonsEnabled();
 });
@@ -743,6 +737,22 @@ function openSyncDialog(){
   dlg.showModal();
   setTimeout(()=>inp.focus(), 0);
 }
+
+// Make Enter in the Sync Name input behave like clicking "Save" (value="ok").
+// On many browsers the default submit button is the first one (Cancel), which
+// causes the dialog to close with returnValue="cancel" and the Sync Name never
+// persists.
+document.addEventListener('DOMContentLoaded', () => {
+  const dlg = el('syncDialog');
+  const inp = el('syncInput');
+  if (!dlg || !inp) return;
+  inp.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      dlg.close('ok');
+    }
+  });
+});
 function ensureSync(action){
   if (currentSync) return true;
   pendingAction = action || pendingAction;
