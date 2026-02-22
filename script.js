@@ -433,29 +433,22 @@ async function downloadExcel(){
     const ab = await res.arrayBuffer();
     const zip = await JSZip.loadAsync(ab);
 
-    if (zip.file('xl/calcChain.xml')) zip.remove('xl/calcChain.xml');
-
-
-    // Force Excel to recalculate formulas on open (ensures SUM and mileage formulas update)
-    const wbPath = 'xl/workbook.xml';
-    if (zip.file(wbPath)) {
-      let wbXml = await zip.file(wbPath).async('string');
-      // Ensure calcPr exists and set calcMode=auto and fullCalcOnLoad=1
-      if (wbXml.includes('<calcPr')) {
-        wbXml = wbXml.replace(/<calcPr([^>]*)>/, (m, attrs) => {
-          let a = attrs;
-          if (!/\bcalcMode=/.test(a)) a += ' calcMode="auto"';
-          a = a.replace(/calcMode="[^"]*"/, 'calcMode="auto"');
-          if (!/\bfullCalcOnLoad=/.test(a)) a += ' fullCalcOnLoad="1"';
-          a = a.replace(/fullCalcOnLoad="[^"]*"/, 'fullCalcOnLoad="1"');
-          return `<calcPr${a}>`;
-        });
-      } else {
-        // Insert calcPr under workbook root if missing
-        wbXml = wbXml.replace(/<workbook([^>]*)>/, `<workbook$1><calcPr calcMode="auto" fullCalcOnLoad="1"/>`);
+    // Ensure Excel recalculates formulas on open (without deleting calcChain, to avoid repair prompts)
+    try{
+      const wbPath = 'xl/workbook.xml';
+      const wbXml = await zip.file(wbPath).async('string');
+      const wbDoc = new DOMParser().parseFromString(wbXml, 'application/xml');
+      const wbNS = wbDoc.documentElement.namespaceURI;
+      let calcPr = wbDoc.getElementsByTagNameNS(wbNS, 'calcPr')[0] || wbDoc.getElementsByTagName('calcPr')[0];
+      if (!calcPr){
+        calcPr = wbDoc.createElementNS(wbNS, 'calcPr');
+        wbDoc.documentElement.appendChild(calcPr);
       }
-      zip.file(wbPath, wbXml);
-    }
+      calcPr.setAttribute('calcMode','auto');
+      calcPr.setAttribute('fullCalcOnLoad','1');
+      zip.file(wbPath, new XMLSerializer().serializeToString(wbDoc));
+    }catch(e){ /* ignore */ }
+
 
     const sheetPath = 'xl/worksheets/sheet1.xml';
     const sheetXml = await zip.file(sheetPath).async('string');
@@ -504,10 +497,28 @@ async function downloadExcel(){
       else rowEl.appendChild(cell);
       return cell;
     }
-    function setCellNumber(ref, num){
+    function setCellNumber(ref, num, keepFormula=false){
       const cell = ensureCell(ref);
       cell.removeAttribute('t');
-      while (cell.firstChild) cell.removeChild(cell.firstChild);
+
+      const styleAttr = cell.getAttribute('s');
+      const existingF = cell.getElementsByTagNameNS(xmlNS,'f')[0] || cell.getElementsByTagName('f')[0];
+
+      if (keepFormula && existingF){
+        const children = Array.from(cell.childNodes);
+        for (const ch of children){
+          if (ch.nodeType === 1 && (ch.localName === 'f' || ch.nodeName.endsWith(':f'))) continue;
+          cell.removeChild(ch);
+        }
+      } else {
+        while (cell.firstChild) cell.removeChild(cell.firstChild);
+      }
+
+      if (styleAttr) cell.setAttribute('s', styleAttr);
+
+      const oldV = cell.getElementsByTagNameNS(xmlNS,'v')[0] || cell.getElementsByTagName('v')[0];
+      if (oldV) oldV.parentNode.removeChild(oldV);
+
       const v = sheetDoc.createElementNS(xmlNS,'v');
       v.textContent = String(num);
       cell.appendChild(v);
@@ -518,7 +529,7 @@ async function downloadExcel(){
       while (cell.firstChild) cell.removeChild(cell.firstChild);
       const is = sheetDoc.createElementNS(xmlNS,'is');
       const t = sheetDoc.createElementNS(xmlNS,'t');
-      if (/^\s|\s$/.test(str)) t.setAttribute('xml:space','preserve');
+      if (/^\s|\s$/.test(str)) t.setAttributeNS('http://www.w3.org/XML/1998/namespace','xml:space','preserve');
       t.textContent = str;
       is.appendChild(t);
       cell.appendChild(is);
@@ -536,26 +547,9 @@ async function downloadExcel(){
     }
 
     const payload = serialize();
-
-    function parseNum(v){
-      if (v === null || v === undefined) return null;
-      if (typeof v === 'number' && Number.isFinite(v)) return v;
-      const t = String(v).replace(/[$,]/g,'').trim();
-      if (!t) return null;
-      const n = Number(t);
-      return Number.isFinite(n) ? n : null;
-    }
-
     for (const [addr,val] of Object.entries(payload.entries || {})){
-      const { row } = splitRef(addr);
-      // Rows 8-9 are text (FROM/TO). Everything else we export as numbers when possible.
-      if (row === 8 || row === 9){
-        setCellStringInline(addr, (val ?? '').toString());
-        continue;
-      }
-      const n = parseNum(val);
-      if (n !== null) setCellNumber(addr, n);
-      else setCellStringInline(addr, (val ?? '').toString());
+      if (typeof val === 'number') setCellNumber(addr, val);
+      else setCellStringInline(addr, String(val));
     }
 
     // Cached Personal Car Mileage values in row 29 based on miles (row 10).
@@ -565,11 +559,11 @@ async function downloadExcel(){
       const amt = (Number.isFinite(miles) ? miles : 0) * MILEAGE_RATE;
       if (amt > 0){
         mileageWeekTotal += amt;
-        setCellNumber(`${dayCols[i]}29`, Number(amt.toFixed(2)));
+        setCellNumber(`${dayCols[i]}29`, Number(amt.toFixed(2)), true);
       }
     }
     if (mileageWeekTotal > 0){
-      setCellNumber(`J29`, Number(mileageWeekTotal.toFixed(2)));
+      setCellNumber(`J29`, Number(mileageWeekTotal.toFixed(2)), true);
     }
 
     zip.file(sheetPath, new XMLSerializer().serializeToString(sheetDoc));
