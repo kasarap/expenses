@@ -514,9 +514,26 @@ async function downloadExcel(){
     }
 
     const payload = serialize();
+
+    function parseNum(v){
+      if (v === null || v === undefined) return null;
+      if (typeof v === 'number' && Number.isFinite(v)) return v;
+      const t = String(v).replace(/[$,]/g,'').trim();
+      if (!t) return null;
+      const n = Number(t);
+      return Number.isFinite(n) ? n : null;
+    }
+
     for (const [addr,val] of Object.entries(payload.entries || {})){
-      if (typeof val === 'number') setCellNumber(addr, val);
-      else setCellStringInline(addr, String(val));
+      const { row } = splitRef(addr);
+      // Rows 8-9 are text (FROM/TO). Everything else we export as numbers when possible.
+      if (row === 8 || row === 9){
+        setCellStringInline(addr, (val ?? '').toString());
+        continue;
+      }
+      const n = parseNum(val);
+      if (n !== null) setCellNumber(addr, n);
+      else setCellStringInline(addr, (val ?? '').toString());
     }
 
     // Cached Personal Car Mileage values in row 29 based on miles (row 10).
