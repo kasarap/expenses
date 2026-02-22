@@ -329,123 +329,109 @@ async function apiFetchJson(url, opts={}){
   return res.json();
 }
 
-async function refreshWeekDropdown(autoLoadMostRecent=true){
+async function refreshWeekDropdown(){
   const sel = el('weekSelect');
-  if (!sel) return;
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">(Select a week)</option>';
+  entryIndex = new Map();
 
-  // If no sync selected, show empty list.
   if (!currentSync){
-    sel.innerHTML = '<option value="">(Select a week)</option>';
-    entryIndex = new Map();
+    setButtonsEnabled();
     return;
   }
 
   try{
     const out = await apiFetchJson(`${API.weeks}?sync=${encodeURIComponent(currentSync)}`);
     const list = Array.isArray(out.entries) ? out.entries : [];
-
-    const keep = sel.value;
-    sel.innerHTML = '<option value="">(Select a week)</option>';
-    entryIndex = new Map(); // weekEnding -> meta
-
+    // newest week ending first already, but ensure
+    list.sort((a,b)=> (String(b.weekEnding||'')).localeCompare(String(a.weekEnding||'')));
     list.forEach(item=>{
-      const we = (item && item.weekEnding) ? String(item.weekEnding) : '';
+      const we = String(item.weekEnding||'').trim();
       if (!we) return;
-      const bp = (item && item.businessPurpose) ? String(item.businessPurpose) : '';
-      const updatedAt = (item && item.updatedAt) ? String(item.updatedAt) : '';
-      entryIndex.set(we, { businessPurpose: bp, updatedAt });
-
-      const opt=document.createElement('option');
+      entryIndex.set(we, { updatedAt: item.updatedAt || '', businessPurpose: item.businessPurpose || '' });
+      const opt = document.createElement('option');
       opt.value = we;
       // Label: YY.MM.DD - <export filename base without .xlsx>
-      const base = safeFilenameBase(we, bp);
-      opt.textContent = `${fmtYYMMDD(parseISODate(we))} - ${base}`;
+      const sat = parseISODate(we);
+      const prefix = fmtYYMMDD(sat);
+      const base = safeFilenameBase(we, item.businessPurpose || '');
+      opt.textContent = `${prefix} - ${base}`;
       sel.appendChild(opt);
     });
 
-    // Keep selection if still present
-    if (keep && entryIndex.has(keep)){
-      sel.value = keep;
-    } else if (autoLoadMostRecent && list.length){
-      // Auto-select most recently edited entry (first entry from API is already sorted)
-      sel.value = list[0].weekEnding;
-      await loadWeek(); // load selected
-    }
-  } catch (e){
-    console.error(e);
+    // keep selection if exists
+    if (keep && entryIndex.has(keep)) sel.value = keep;
+  } catch(e){
+    // keep empty list; show status but don't break UI
+    setStatus('Could not load saved weeks.');
   }
+  setButtonsEnabled();
 }
 
 async function loadWeek(){
-  const sel = el('weekSelect');
-  const we = sel ? (sel.value || '').trim() : '';
-  if (!currentSync || !we) return;
-
+  if (!currentSync){
+    setStatus('Set Sync Name first.');
+    return;
+  }
+  const sel = el('weekSelect').value;
+  if (!sel){
+    setStatus('Pick a saved week.');
+    return;
+  }
   setStatus('Loading…');
   try{
-    const out = await apiFetchJson(`${API.data}?sync=${encodeURIComponent(currentSync)}&weekEnding=${encodeURIComponent(we)}`);
-    const payload = out && out.data ? out.data : null;
-    if (!payload){
+    const out = await apiFetchJson(`${API.data}?sync=${encodeURIComponent(currentSync)}&weekEnding=${encodeURIComponent(sel)}`);
+    const data = out && out.data ? out.data : null;
+    if (!data){
       setStatus('No data found.');
       return;
     }
-    applyData(payload);
-    // Ensure currentWeekEnding tracks loaded record
-    if (payload.weekEnding) currentWeekEnding = String(payload.weekEnding);
+    applyData(data);
     setStatus('Loaded.');
-  } catch (e){
-    console.error(e);
+  } catch(e){
     setStatus('Load failed.');
+    console.error(e);
   }
 }
 
 async function saveWeek(){
-  if (!ensureSync()) return;
-
-  // Must have a week ending (set by Sunday date)
   if (!currentWeekEnding){
     setStatus('Enter a Sunday date first.');
     return;
   }
+  if (!ensureSync()) return;
 
   setStatus('Saving…');
   try{
-    const payload = collectData();
-    payload.sync = currentSync;
-    payload.weekEnding = currentWeekEnding;
-
+    const payload = serialize();
     await apiFetchJson(`${API.data}?sync=${encodeURIComponent(currentSync)}&weekEnding=${encodeURIComponent(currentWeekEnding)}`, {
-      method: 'PUT',
+      method:'PUT',
       body: JSON.stringify(payload)
     });
-
     setStatus('Saved.');
-    await refreshWeekDropdown(false);
-    // Select this week after save
-    const sel = el('weekSelect');
-    if (sel) sel.value = currentWeekEnding;
-  } catch (e){
+    await refreshWeekDropdown();
+    el('weekSelect').value = currentWeekEnding;
+    setButtonsEnabled();
+  } catch(e){
+    setStatus('Save failed.');
     console.error(e);
-    setStatus(`Save failed.`);
   }
 }
 
 async function deleteWeek(){
-  const sel = el('weekSelect');
-  const we = sel ? (sel.value || '').trim() : '';
-  if (!currentSync || !we) return;
-  if (!confirm('Delete this saved entry?')) return;
+  if (!currentSync || !currentWeekEnding) return;
+  if (!confirm(`Delete saved week ending ${currentWeekEnding} for sync "${currentSync}"?`)) return;
 
   setStatus('Deleting…');
   try{
-    await apiFetchJson(`${API.data}?sync=${encodeURIComponent(currentSync)}&weekEnding=${encodeURIComponent(we)}`, { method:'DELETE' });
+    await apiFetchJson(`${API.data}?sync=${encodeURIComponent(currentSync)}&weekEnding=${encodeURIComponent(currentWeekEnding)}`, { method:'DELETE' });
+    // Clear entries but keep sync
+    clearInputs({ resetSync:false, resetWeekSelect:true, resetDates:true });
     setStatus('Deleted.');
-    // Clear selection & form (do not delete cloud beyond this entry)
-    clearInputs({ resetWeekSelect:true, resetDates:false, resetSync:false });
-    await refreshWeekDropdown(false);
-  } catch (e){
-    console.error(e);
+    await refreshWeekDropdown();
+  } catch(e){
     setStatus('Delete failed.');
+    console.error(e);
   }
 }
 
@@ -662,35 +648,32 @@ function setWeekFromSunday(sundayISO){
 el('sundayDate').addEventListener('change', ()=>{
   const v = el('sundayDate').value;
   if (!v) return;
+
+  const nextWE = toISODate(computeWeekEndingFromSunday(v));
+
   // If the user changes weeks, start fresh automatically.
-  // (Does not delete cloud; just clears the form and resets Sync.)
-  if (currentWeekEnding){
-    const nextWE = toISODate(computeWeekEndingFromSunday(v));
-    if (nextWE !== currentWeekEnding){
-      clearInputs({ resetDates:false, resetWeekSelect:true, resetSync:false });
-      el('businessPurpose').value='';
-    }
+  // (Does not delete cloud; clears only the entry fields/dates for the new week.)
+  if (currentWeekEnding && nextWE !== currentWeekEnding){
+    clearInputs({ resetDates:false, resetWeekSelect:true, resetSync:false });
+    // keep business purpose? user likely per week; clear it
+    el('businessPurpose').value = '';
   }
+
   setWeekFromSunday(v);
-  setButtonsEnabled();
 });
 
 
 el('weekSelect').addEventListener('change', async ()=>{
-  const v = el('weekSelect').value;
-  if (!v) return;
-  currentSync = v;
-  renderSync();
-
-  const meta = entryIndex.get(v);
-  const we = meta && meta.weekEnding ? meta.weekEnding : (v.match(/^\d{4}-\d{2}-\d{2}$/) ? v : '');
-  if (we){
-    currentWeekEnding = we;
-    el('weekEnding').value = we;
-    el('sundayDate').value = toISODate(computeSundayFromWeekEnding(we));
+  const we = el('weekSelect').value;
+  if (!we) return;
+  if (!currentSync){
+    setStatus('Set Sync Name first.');
+    return;
   }
+  currentWeekEnding = we;
+  el('weekEnding').value = we;
+  el('sundayDate').value = toISODate(computeSundayFromWeekEnding(we));
   await loadWeek();
-  setButtonsEnabled();
 });
 
 el('btnSave').addEventListener('click', saveWeek);
@@ -725,20 +708,19 @@ el('btnDownload').addEventListener('click', downloadExcel);
   });
 
   refreshWeekDropdown().then(async ()=>{
-    // On page load, automatically select and load the most recently edited entry (top of dropdown)
+    // On page load, if a Sync Name is already set, load the newest saved week for that Sync.
+    if (!currentSync){
+      setButtonsEnabled();
+      return;
+    }
     const sel = el('weekSelect');
     const firstReal = Array.from(sel.options).find(o=>o.value);
     if (firstReal){
-      currentSync = firstReal.value;
-      renderSync();
-      sel.value = currentSync;
-      const meta = entryIndex.get(currentSync);
-      const we = meta && meta.weekEnding ? meta.weekEnding : '';
-      if (we){
-        currentWeekEnding = we;
-        el('weekEnding').value = we;
-        el('sundayDate').value = toISODate(computeSundayFromWeekEnding(we));
-      }
+      const we = firstReal.value;
+      sel.value = we;
+      currentWeekEnding = we;
+      el('weekEnding').value = we;
+      el('sundayDate').value = toISODate(computeSundayFromWeekEnding(we));
       await loadWeek();
     }
     setButtonsEnabled();
@@ -755,7 +737,7 @@ function setButtonsEnabled(){
   el('btnClear').disabled = !hasWeek;
   el('btnDownload').disabled = !hasWeek;
   // Delete only if this sync exists in KV list (so we don't delete an unsaved draft)
-  el('btnDeleteWeek').disabled = !(hasSync && entryIndex.has(currentSync));
+  el('btnDeleteWeek').disabled = !(hasSync && hasWeek && entryIndex.has(currentWeekEnding));
 }
 function sanitizeSyncName(s){
   if (!s) return '';

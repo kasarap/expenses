@@ -4,52 +4,42 @@ function json(data, status=200) {
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
   });
 }
+function bad(msg, status=400){ return json({ error: msg }, status); }
 
 export async function onRequest(context) {
   const { request, env } = context;
   const kv = env.EXPENSES_KV;
-  if (!kv) return json({ error: 'Missing KV binding EXPENSES_KV' }, 500);
+  if (!kv) return bad('Missing KV binding EXPENSES_KV', 500);
 
   const url = new URL(request.url);
   const sync = (url.searchParams.get('sync') || '').trim();
-  if (!sync) return json({ entries: [] });
+  if (!sync) return bad('Missing sync');
 
-  // List all entries for this sync (paginate KV list)
-  let cursor = undefined;
-  const keys = [];
   const prefix = `expenses:${sync}:`;
-  while (true) {
-    const page = await kv.list({ prefix, cursor });
-    for (const k of (page.keys || [])) keys.push(k.name);
-    if (!page.list_complete) {
-      cursor = page.cursor;
-      if (!cursor) break;
-    } else {
-      break;
-    }
-  }
 
+  let cursor = undefined;
   const entries = [];
-  for (const fullKey of keys) {
-    const weekEnding = fullKey.slice(prefix.length);
-    let data = null;
-    try { data = await kv.get(fullKey, { type: 'json' }); } catch {}
-    const bp = (data && typeof data.businessPurpose === 'string') ? data.businessPurpose : '';
-    const updatedAt = (data && typeof data.updatedAt === 'string') ? data.updatedAt : '';
-    entries.push({ weekEnding, businessPurpose: bp, updatedAt });
+  while (true) {
+    const res = await kv.list({ prefix, cursor, limit: 1000 });
+    for (const k of res.keys) {
+      const name = k.name; // expenses:sync:YYYY-MM-DD
+      const weekEnding = name.substring(prefix.length);
+      // read minimal metadata
+      let obj = null;
+      try { obj = await kv.get(name, { type:'json' }); } catch {}
+      entries.push({
+        key: name,
+        weekEnding,
+        updatedAt: obj?.updatedAt || null,
+        businessPurpose: obj?.businessPurpose || obj?.businessPurposeOfExpenses || '',
+      });
+    }
+    cursor = res.cursor;
+    if (!res.list_complete) continue;
+    break;
   }
 
-  // Sort: most recently edited first; fallback to weekEnding desc
-  entries.sort((a,b)=>{
-    const au=a.updatedAt||'';
-    const bu=b.updatedAt||'';
-    if (au && bu) return bu.localeCompare(au);
-    if (bu) return 1;
-    if (au) return -1;
-    const aw=a.weekEnding||'';
-    const bw=b.weekEnding||'';
-    return bw.localeCompare(aw);
-  });
-
-  return json({ entries });
+  // sort newest weekEnding first
+  entries.sort((a,b)=> (b.weekEnding || '').localeCompare(a.weekEnding || ''));
+  return json({ ok:true, sync, entries });
 }
