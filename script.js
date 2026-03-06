@@ -49,7 +49,7 @@ let weeksCache = []; // [{weekEnding,businessPurpose,updatedAt}]
 let loading = false;
 let currentData = null; // Holds the full entry data (including line items)
 let currentEditAddr = null; // Address being edited in modal
-const APP_VERSION = '39'; // Update this for each revision
+const APP_VERSION = '40'; // Update this for each revision
 
 // ============ LINE-ITEM MANAGEMENT ============
 
@@ -426,34 +426,10 @@ function recomputeDerived(){
 }
 
 function updateCellItemsDisplay(){
-  // Update all line item displays in the main table
+  // Temporarily disabled - showing artifacts
+  // Line items are stored and exported, just not displayed in table for now
   const displays = el('entryTable').querySelectorAll('.cell-items-display');
-  displays.forEach(display => {
-    const addr = display.dataset.addr;
-    const itemsKey = `${addr}_items`;
-    
-    // Only show if there are ACTUAL itemized entries (not fallback from single amount)
-    const actualItems = currentData?.entries?.[itemsKey];
-    
-    display.innerHTML = '';
-    
-    // Only show if there are actual multiple items in the items array
-    if (Array.isArray(actualItems) && actualItems.length > 1){
-      actualItems.forEach(item => {
-        const itemEl = document.createElement('div');
-        itemEl.className = 'cell-item';
-        
-        // Format: amount and vendor (if available)
-        let text = `$${Number(item.amount).toFixed(2)}`;
-        if (item.vendor && item.vendor.trim()){
-          text += ` ${item.vendor}`;
-        }
-        
-        itemEl.textContent = text;
-        display.appendChild(itemEl);
-      });
-    }
-  });
+  displays.forEach(display => { display.innerHTML = ''; });
 }
 
 function computeTotals(){
@@ -688,21 +664,6 @@ async function downloadExcel(){
     const ab = await res.arrayBuffer();
     const zip = await JSZip.loadAsync(ab);
 
-    try{
-      const wbPath = 'xl/workbook.xml';
-      const wbXml = await zip.file(wbPath).async('string');
-      const wbDoc = new DOMParser().parseFromString(wbXml, 'application/xml');
-      const wbNS = wbDoc.documentElement.namespaceURI;
-      let calcPr = wbDoc.getElementsByTagNameNS(wbNS, 'calcPr')[0] || wbDoc.getElementsByTagName('calcPr')[0];
-      if (!calcPr){
-        calcPr = wbDoc.createElementNS(wbNS, 'calcPr');
-        wbDoc.documentElement.appendChild(calcPr);
-      }
-      calcPr.setAttribute('calcMode','auto');
-      calcPr.setAttribute('fullCalcOnLoad','1');
-      zip.file(wbPath, new XMLSerializer().serializeToString(wbDoc));
-    }catch(e){ /* ignore */ }
-
     const sheetPath = 'xl/worksheets/sheet1.xml';
     const sheetXml = await zip.file(sheetPath).async('string');
     const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml');
@@ -713,125 +674,72 @@ async function downloadExcel(){
     const sat = parseISODate(satISO);
     const sun = computeSundayFromWeekEnding(satISO);
 
-    function qsa(node, sel){ return Array.from(node.querySelectorAll(sel)); }
     function findCell(ref){ return sheetDoc.querySelector(`c[r="${ref}"]`); }
-    function ensureRow(rowNum){
-      const sheetData = sheetDoc.getElementsByTagName('sheetData')[0];
-      let row = sheetDoc.querySelector(`row[r="${rowNum}"]`);
-      if (row) return row;
-      row = sheetDoc.createElementNS(xmlNS, 'row');
-      row.setAttribute('r', String(rowNum));
-      const rows = qsa(sheetData, 'row');
-      const after = rows.find(r => parseInt(r.getAttribute('r'),10) > rowNum);
-      if (after) sheetData.insertBefore(row, after);
-      else sheetData.appendChild(row);
-      return row;
-    }
-    function colToNum(col){
-      let n=0;
-      for (const ch of col){ n = n*26 + (ch.charCodeAt(0)-64); }
-      return n;
-    }
-    function splitRef(ref){
-      const m = ref.match(/^([A-Z]+)(\d+)$/);
-      return {col:m[1], row:parseInt(m[2],10)};
-    }
-    function ensureCell(ref){
-      let cell = findCell(ref);
-      if (cell) return cell;
-      const {col,row} = splitRef(ref);
-      const rowEl = ensureRow(row);
-      cell = sheetDoc.createElementNS(xmlNS,'c');
-      cell.setAttribute('r', ref);
-      const cells = qsa(rowEl,'c');
-      const target = colToNum(col);
-      const after = cells.find(c => colToNum(splitRef(c.getAttribute('r')).col) > target);
-      if (after) rowEl.insertBefore(cell, after);
-      else rowEl.appendChild(cell);
-      return cell;
-    }
-    function setCellNumber(ref, num, keepFormula=false){
-      const cell = ensureCell(ref);
-      cell.removeAttribute('t');
-      let v = cell.querySelector('v');
-      if (!v){ v = sheetDoc.createElementNS(xmlNS,'v'); cell.appendChild(v); }
-      v.textContent = String(num);
-      if (!keepFormula){
-        const f = cell.querySelector('f');
-        if (f) f.remove();
+    function setCellNumber(ref, num){
+      const cell = findCell(ref);
+      if (cell){
+        let v = cell.querySelector('v');
+        if (v) v.textContent = String(num);
       }
     }
     function setCellStringInline(ref, str){
-      const cell = ensureCell(ref);
-      cell.setAttribute('t','inlineStr');
-      let is = cell.querySelector('is');
-      if (!is){ is = sheetDoc.createElementNS(xmlNS,'is'); cell.appendChild(is); }
-      is.innerHTML = '';
-      const t = sheetDoc.createElementNS(xmlNS,'t');
-      t.textContent = str;
-      is.appendChild(t);
+      const cell = findCell(ref);
+      if (cell){
+        let t = cell.querySelector('is t');
+        if (t) t.textContent = str;
+      }
     }
     
-    // Set business purpose and dates
+    // Only fill in existing cells - don't modify structure
     setCellStringInline('B2', bp);
-    setCellStringInline('B7', fmtYYMMDD(sat)); // Week ending date
-    
-    // Get all the actual data with line items summed
-    const allAddresses = new Set();
-    
-    // Collect all addresses from actual inputs
+    setCellStringInline('B7', fmtYYMMDD(sat));
+
+    // Write amounts to existing cells only
     allInputs().forEach(inp => {
+      if (inp.dataset.computed === 'true') return;
       const addr = `${inp.dataset.col}${inp.dataset.row}`;
-      allAddresses.add(addr);
-    });
-    
-    // Write all entries to Excel
-    allAddresses.forEach(addr => {
-      const items = getLineItems(addr);
-      if (items.length > 0){
-        // Sum all line items for this cell
-        const total = items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-        if (total > 0){
-          setCellNumber(addr, total);
-        }
-      } else {
-        // Check for single value in input
-        const inp = el('entryTable').querySelector(`input[data-col="${addr[0]}"][data-row="${addr.substring(1)}"]`);
-        if (inp && inp.value){
-          const val = inp.value;
-          if (inp.dataset.type === 'number' || inp.dataset.type === 'currency'){
-            const n = Number(val);
-            if (Number.isFinite(n) && n > 0){
-              setCellNumber(addr, n);
-            }
-          } else {
-            setCellStringInline(addr, String(val));
+      const val = inp.value;
+      
+      if (val){
+        if (inp.dataset.type === 'number' || inp.dataset.type === 'currency'){
+          const n = Number(val);
+          if (Number.isFinite(n) && n > 0){
+            setCellNumber(addr, n);
           }
+        } else {
+          setCellStringInline(addr, String(val));
         }
       }
     });
 
-    // Calculate mileage totals
-    let mileageWeekTotal = 0;
+    // Mileage calculations
     for (let i=0;i<7;i++){
       const miles = Number(el('entryTable').querySelector(`input[data-col="${dayCols[i]}"][data-row="10"]`)?.value ?? 0);
       const amt = (Number.isFinite(miles) ? miles : 0) * MILEAGE_RATE;
       if (amt > 0){
-        mileageWeekTotal += amt;
-        setCellNumber(`${dayCols[i]}29`, Number(amt.toFixed(2)), true);
+        setCellNumber(`${dayCols[i]}29`, Number(amt.toFixed(2)));
       }
-    }
-    if (mileageWeekTotal > 0){
-      setCellNumber(`J29`, Number(mileageWeekTotal.toFixed(2)), true);
     }
 
     zip.file(sheetPath, new XMLSerializer().serializeToString(sheetDoc));
     const outBlob = await zip.generateAsync({type:'blob'});
 
-    const safeBp = (bp || 'Expenses').replace(/[\/:*?"<>|]+/g,'').trim() || 'Expenses';
+    // Use the saved entry label format (minus the date prefix)
+    let filename = `Expenses_v${APP_VERSION}.xlsx`;
+    const weekSelectEl = el('weekSelect');
+    if (weekSelectEl && weekSelectEl.value){
+      const selectedOption = weekSelectEl.querySelector(`option[value="${weekSelectEl.value}"]`);
+      if (selectedOption){
+        let optionText = selectedOption.textContent.trim();
+        optionText = optionText.replace(/^\d{2}\.\d{2}\.\d{2}\s*-\s*/, '');
+        optionText = optionText.replace(/[\/:*?"<>|]+/g, '').trim();
+        filename = `Expenses_v${APP_VERSION}_${optionText}.xlsx`;
+      }
+    }
+    
     const a = document.createElement('a');
     a.href = URL.createObjectURL(outBlob);
-    a.download = `Expenses_v${APP_VERSION}_Week${fmtMD(sun)}through${fmtMD(sat)}_${safeBp}.xlsx`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
