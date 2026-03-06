@@ -58,16 +58,17 @@ function generateItemId(){
   return `item_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
 }
 
-// Get all line items for a cell (fallback to single amount if not itemized)
+// Get all line items for a cell (only actual itemized data)
 function getLineItems(addr){
   const items = currentData?.entries?.[`${addr}_items`];
-  if (Array.isArray(items) && items.length > 0) return items;
   
-  // Fallback: single-item from old data
-  const val = currentData?.entries?.[addr];
-  if (val && typeof val === 'number' && val > 0){
-    return [{ id: generateItemId(), amount: val, vendor: '', note: '' }];
+  // Only return if there are actual stored items
+  if (Array.isArray(items) && items.length > 0) {
+    return items;
   }
+  
+  // For cells with single amounts (no items array), return empty
+  // This prevents showing artifacts from old single-value data
   return [];
 }
 
@@ -485,8 +486,8 @@ function computeTotals(){
   });
   el('totWEEK').value = week ? ('$' + week.toFixed(2)) : '';
   
-  // Update line item displays
-  updateCellItemsDisplay();
+  // Update line item displays - call this AFTER all totals are computed
+  setTimeout(() => { updateCellItemsDisplay(); }, 0);
 }
 
 function serialize(){
