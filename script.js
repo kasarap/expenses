@@ -49,7 +49,7 @@ let weeksCache = []; // [{weekEnding,businessPurpose,updatedAt}]
 let loading = false;
 let currentData = null; // Holds the full entry data (including line items)
 let currentEditAddr = null; // Address being edited in modal
-const APP_VERSION = '40'; // Update this for each revision
+const APP_VERSION = '41'; // Update this for each revision
 
 // ============ LINE-ITEM MANAGEMENT ============
 
@@ -689,73 +689,80 @@ async function downloadExcel(){
     const xmlNS = sheetDoc.documentElement.namespaceURI;
 
     const bp = (el('businessPurpose')?.value || '').trim();
-    const satISO = currentWeekEnding;
-    const sat = parseISODate(satISO);
-    const sun = computeSundayFromWeekEnding(satISO);
+    const sat = parseISODate(currentWeekEnding);
+    const sun = computeSundayFromWeekEnding(currentWeekEnding);
 
-    function findCell(ref){ return sheetDoc.querySelector(`c[r="${ref}"]`); }
-    function setCellNumber(ref, num){
-      const cell = findCell(ref);
-      if (cell){
+    // Function to properly update cells
+    function updateCell(cellRef, value) {
+      const cell = sheetDoc.querySelector(`c[r="${cellRef}"]`);
+      if (!cell) return;
+      
+      if (typeof value === 'number') {
+        // Number type
+        cell.setAttribute('t', 'n');
         let v = cell.querySelector('v');
-        if (v) v.textContent = String(num);
+        if (!v) {
+          v = sheetDoc.createElementNS(xmlNS, 'v');
+          cell.appendChild(v);
+        }
+        v.textContent = String(value);
+      } else if (typeof value === 'string' && value) {
+        // String type (inlineStr)
+        cell.setAttribute('t', 'inlineStr');
+        let is = cell.querySelector('is');
+        if (!is) {
+          is = sheetDoc.createElementNS(xmlNS, 'is');
+          cell.appendChild(is);
+        }
+        let t = is.querySelector('t');
+        if (!t) {
+          t = sheetDoc.createElementNS(xmlNS, 't');
+          is.appendChild(t);
+        }
+        t.textContent = String(value);
       }
     }
-    function setCellStringInline(ref, str){
-      const cell = findCell(ref);
-      if (cell && str){
-        let t = cell.querySelector('is > t');
-        if (t) t.textContent = str;
-      }
-    }
-    
-    // Only fill in existing cells - don't modify structure
-    setCellStringInline('B2', bp);
-    setCellStringInline('B7', fmtYYMMDD(sat));
 
-    // Write amounts to existing cells only
+    // Write business purpose and date
+    updateCell('B2', bp);
+    updateCell('B7', fmtYYMMDD(sat));
+
+    // Write all expense values
     allInputs().forEach(inp => {
       if (inp.dataset.computed === 'true') return;
+      const val = inp.value ? inp.value.trim() : '';
+      if (!val) return;
+
       const addr = `${inp.dataset.col}${inp.dataset.row}`;
-      const val = inp.value;
-      
-      if (val){
-        if (inp.dataset.type === 'number' || inp.dataset.type === 'currency'){
-          const n = Number(val);
-          if (Number.isFinite(n) && n > 0){
-            setCellNumber(addr, n);
-          }
-        } else {
-          setCellStringInline(addr, String(val));
+
+      if (inp.dataset.type === 'number' || inp.dataset.type === 'currency') {
+        const n = Number(val);
+        if (Number.isFinite(n) && n > 0) {
+          updateCell(addr, n);
         }
+      } else {
+        updateCell(addr, val);
       }
     });
-
-    // Mileage calculations
-    for (let i=0;i<7;i++){
-      const miles = Number(el('entryTable').querySelector(`input[data-col="${dayCols[i]}"][data-row="10"]`)?.value ?? 0);
-      const amt = (Number.isFinite(miles) ? miles : 0) * MILEAGE_RATE;
-      if (amt > 0){
-        setCellNumber(`${dayCols[i]}29`, Number(amt.toFixed(2)));
-      }
-    }
 
     zip.file(sheetPath, new XMLSerializer().serializeToString(sheetDoc));
     const outBlob = await zip.generateAsync({type:'blob'});
 
-    // Use the saved entry label format (minus the date prefix)
-    let filename = `Expenses_v${APP_VERSION}.xlsx`;
+    // Filename: just the saved entry label without date prefix and without version
+    let filename = `Week ${fmtMD(sun)} through ${fmtMD(sat)} - Angelton.xlsx`;
+    
     const weekSelectEl = el('weekSelect');
-    if (weekSelectEl && weekSelectEl.value){
+    if (weekSelectEl && weekSelectEl.value) {
       const selectedOption = weekSelectEl.querySelector(`option[value="${weekSelectEl.value}"]`);
-      if (selectedOption){
+      if (selectedOption) {
         let optionText = selectedOption.textContent.trim();
-        optionText = optionText.replace(/^\d{2}\.\d{2}\.\d{2}\s*-\s*/, '');
-        optionText = optionText.replace(/[\/:*?"<>|]+/g, '').trim();
-        filename = `Expenses_v${APP_VERSION}_${optionText}.xlsx`;
+        // Remove date prefix like "26.03.07 - "
+        optionText = optionText.replace(/^\d{2}\.\d{2}\.\d{2}\s*-\s*/, '').trim();
+        // Result: "Week 3-1 through 3-7 - Angelton"
+        filename = optionText + '.xlsx';
       }
     }
-    
+
     const a = document.createElement('a');
     a.href = URL.createObjectURL(outBlob);
     a.download = filename;
@@ -766,7 +773,7 @@ async function downloadExcel(){
     setStatus('Excel downloaded.');
   } catch (e){
     console.error(e);
-    setStatus('Excel export failed.');
+    setStatus('Excel export failed: ' + e.message);
   }
 }
 
