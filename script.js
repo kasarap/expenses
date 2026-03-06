@@ -186,9 +186,27 @@ function updateModalTotal(){
   const items = getLineItems(currentEditAddr);
   const total = items.reduce((sum, item)=> sum + (Number(item.amount) || 0), 0);
   el('modalTotal').textContent = total > 0 ? `$${total.toFixed(2)}` : '$0.00';
+  
+  // Also update the main table input in real-time
+  const inp = el('entryTable').querySelector(`input[data-col="${currentEditAddr[0]}"][data-row="${currentEditAddr.substring(1)}"]`);
+  if (inp){
+    inp.value = total > 0 ? total.toFixed(2) : '';
+  }
 }
 
 function closeLineItemModal(){
+  // Update the main table input with the combined total
+  if (currentEditAddr && currentData?.entries){
+    const items = getLineItems(currentEditAddr);
+    const total = items.reduce((sum, item)=> sum + (Number(item.amount) || 0), 0);
+    
+    // Find and update the input for this cell
+    const inp = el('entryTable').querySelector(`input[data-col="${currentEditAddr[0]}"][data-row="${currentEditAddr.substring(1)}"]`);
+    if (inp){
+      inp.value = total > 0 ? total.toFixed(2) : '';
+    }
+  }
+  
   el('lineItemModal').close();
   currentEditAddr = null;
   computeTotals();
@@ -322,6 +340,12 @@ function buildTable(){
         wrap.appendChild(inp);
         cellWrapper.appendChild(wrap);
         
+        // Add line items display below the amount
+        const itemsDisplay = document.createElement('div');
+        itemsDisplay.className = 'cell-items-display';
+        itemsDisplay.dataset.addr = `${col}${r.row}`;
+        cellWrapper.appendChild(itemsDisplay);
+        
         // Add (+) button for currency cells only
         if (!r.computed){
           const addBtn = document.createElement('button');
@@ -399,6 +423,27 @@ function recomputeDerived(){
   }
 }
 
+function updateCellItemsDisplay(){
+  // Update all line item displays in the main table
+  const displays = el('entryTable').querySelectorAll('.cell-items-display');
+  displays.forEach(display => {
+    const addr = display.dataset.addr;
+    const items = getLineItems(addr);
+    
+    display.innerHTML = '';
+    
+    // Only show if there are multiple items
+    if (items.length > 1){
+      items.forEach(item => {
+        const itemEl = document.createElement('div');
+        itemEl.className = 'cell-item';
+        itemEl.textContent = `${item.vendor ? item.vendor + ' ' : ''}$${Number(item.amount).toFixed(2)}`;
+        display.appendChild(itemEl);
+      });
+    }
+  });
+}
+
 function computeTotals(){
   recomputeDerived();
   const totals=[0,0,0,0,0,0,0];
@@ -428,6 +473,9 @@ function computeTotals(){
     el(`tot${dayIds[idx]}`).value = t ? ('$' + t.toFixed(2)) : '';
   });
   el('totWEEK').value = week ? ('$' + week.toFixed(2)) : '';
+  
+  // Update line item displays
+  updateCellItemsDisplay();
 }
 
 function serialize(){
@@ -708,10 +756,17 @@ async function downloadExcel(){
       is.appendChild(t);
     }
     setCellStringInline('B7', satISO);
+    
+    // Also set business purpose if your template has a cell for it (typically B2 or nearby)
+    if (bp){
+      setCellStringInline('B2', bp);
+    }
 
     const payload = serialize();
+    
+    // Process all entries, including line items combined
     for (const [addr,val] of Object.entries(payload.entries || {})){
-      if (addr.endsWith('_items')) continue;
+      if (addr.endsWith('_items')) continue; // Skip the items array
       if (typeof val === 'number') setCellNumber(addr, val);
       else setCellStringInline(addr, String(val));
     }
