@@ -266,6 +266,13 @@ input.computed{opacity:.85}
   color: var(--muted);
 }
 
+.cell-items-display:empty {
+  display: none;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
 .cell-item {
   font-size: 11px;
   line-height: 1.2;

@@ -49,6 +49,7 @@ let weeksCache = []; // [{weekEnding,businessPurpose,updatedAt}]
 let loading = false;
 let currentData = null; // Holds the full entry data (including line items)
 let currentEditAddr = null; // Address being edited in modal
+const APP_VERSION = '39'; // Update this for each revision
 
 // ============ LINE-ITEM MANAGEMENT ============
 
@@ -428,16 +429,26 @@ function updateCellItemsDisplay(){
   const displays = el('entryTable').querySelectorAll('.cell-items-display');
   displays.forEach(display => {
     const addr = display.dataset.addr;
-    const items = getLineItems(addr);
+    const itemsKey = `${addr}_items`;
+    
+    // Only show if there are ACTUAL itemized entries (not fallback from single amount)
+    const actualItems = currentData?.entries?.[itemsKey];
     
     display.innerHTML = '';
     
-    // Only show if there are multiple items
-    if (items.length > 1){
-      items.forEach(item => {
+    // Only show if there are actual multiple items in the items array
+    if (Array.isArray(actualItems) && actualItems.length > 1){
+      actualItems.forEach(item => {
         const itemEl = document.createElement('div');
         itemEl.className = 'cell-item';
-        itemEl.textContent = `${item.vendor ? item.vendor + ' ' : ''}$${Number(item.amount).toFixed(2)}`;
+        
+        // Format: amount and vendor (if available)
+        let text = `$${Number(item.amount).toFixed(2)}`;
+        if (item.vendor && item.vendor.trim()){
+          text += ` ${item.vendor}`;
+        }
+        
+        itemEl.textContent = text;
         display.appendChild(itemEl);
       });
     }
@@ -755,25 +766,50 @@ async function downloadExcel(){
       t.textContent = str;
       is.appendChild(t);
     }
-    setCellStringInline('B7', satISO);
     
-    // Also set business purpose if your template has a cell for it (typically B2 or nearby)
-    if (bp){
-      setCellStringInline('B2', bp);
-    }
-
-    const payload = serialize();
+    // Set business purpose and dates
+    setCellStringInline('B2', bp);
+    setCellStringInline('B7', fmtYYMMDD(sat)); // Week ending date
     
-    // Process all entries, including line items combined
-    for (const [addr,val] of Object.entries(payload.entries || {})){
-      if (addr.endsWith('_items')) continue; // Skip the items array
-      if (typeof val === 'number') setCellNumber(addr, val);
-      else setCellStringInline(addr, String(val));
-    }
+    // Get all the actual data with line items summed
+    const allAddresses = new Set();
+    
+    // Collect all addresses from actual inputs
+    allInputs().forEach(inp => {
+      const addr = `${inp.dataset.col}${inp.dataset.row}`;
+      allAddresses.add(addr);
+    });
+    
+    // Write all entries to Excel
+    allAddresses.forEach(addr => {
+      const items = getLineItems(addr);
+      if (items.length > 0){
+        // Sum all line items for this cell
+        const total = items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+        if (total > 0){
+          setCellNumber(addr, total);
+        }
+      } else {
+        // Check for single value in input
+        const inp = el('entryTable').querySelector(`input[data-col="${addr[0]}"][data-row="${addr.substring(1)}"]`);
+        if (inp && inp.value){
+          const val = inp.value;
+          if (inp.dataset.type === 'number' || inp.dataset.type === 'currency'){
+            const n = Number(val);
+            if (Number.isFinite(n) && n > 0){
+              setCellNumber(addr, n);
+            }
+          } else {
+            setCellStringInline(addr, String(val));
+          }
+        }
+      }
+    });
 
+    // Calculate mileage totals
     let mileageWeekTotal = 0;
     for (let i=0;i<7;i++){
-      const miles = Number(payload.entries?.[`${dayCols[i]}10`] ?? 0);
+      const miles = Number(el('entryTable').querySelector(`input[data-col="${dayCols[i]}"][data-row="10"]`)?.value ?? 0);
       const amt = (Number.isFinite(miles) ? miles : 0) * MILEAGE_RATE;
       if (amt > 0){
         mileageWeekTotal += amt;
@@ -790,7 +826,7 @@ async function downloadExcel(){
     const safeBp = (bp || 'Expenses').replace(/[\/:*?"<>|]+/g,'').trim() || 'Expenses';
     const a = document.createElement('a');
     a.href = URL.createObjectURL(outBlob);
-    a.download = `Week ${fmtMD(sun)} through ${fmtMD(sat)} - ${safeBp}.xlsx`;
+    a.download = `Expenses_v${APP_VERSION}_Week${fmtMD(sun)}-${fmtMD(sat)}_${safeBp}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
