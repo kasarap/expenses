@@ -321,11 +321,22 @@ input.computed{opacity:.85}
   border-radius: 6px;
   cursor: pointer;
   flex-shrink: 0;
-  transition: background-color 0.2s;
+  transition: background-color 0.2s, border-color 0.2s;
 }
 
 .cell-add-btn:hover {
   background-color: rgba(77, 163, 255, 0.2) !important;
+}
+
+/* Button color when cell has multiple items */
+.cell-add-btn.has-items {
+  background: rgba(76, 175, 80, 0.2) !important;
+  border: 1px solid #4CAF50 !important;
+  color: #4CAF50 !important;
+}
+
+.cell-add-btn.has-items:hover {
+  background-color: rgba(76, 175, 80, 0.3) !important;
 }
 
 /* Modal Dialog */

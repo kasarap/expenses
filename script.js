@@ -354,6 +354,7 @@ function buildTable(){
           addBtn.type = 'button';
           addBtn.className = 'cell-add-btn';
           addBtn.textContent = '+';
+          addBtn.dataset.addr = `${col}${r.row}`;
           addBtn.addEventListener('click', (e) => {
             e.preventDefault();
             openLineItemModal(`${col}${r.row}`, r.label, dayId);
@@ -432,6 +433,23 @@ function updateCellItemsDisplay(){
   displays.forEach(display => { display.innerHTML = ''; });
 }
 
+function updateButtonColors(){
+  // Update + button colors based on whether cell has multiple items
+  const buttons = el('entryTable').querySelectorAll('.cell-add-btn');
+  buttons.forEach(btn => {
+    const addr = btn.dataset.addr;
+    const itemsKey = `${addr}_items`;
+    const actualItems = currentData?.entries?.[itemsKey];
+    
+    // Change button color if 2+ items
+    if (Array.isArray(actualItems) && actualItems.length > 1){
+      btn.classList.add('has-items');
+    } else {
+      btn.classList.remove('has-items');
+    }
+  });
+}
+
 function computeTotals(){
   recomputeDerived();
   const totals=[0,0,0,0,0,0,0];
@@ -462,8 +480,8 @@ function computeTotals(){
   });
   el('totWEEK').value = week ? ('$' + week.toFixed(2)) : '';
   
-  // Update line item displays - call this AFTER all totals are computed
-  setTimeout(() => { updateCellItemsDisplay(); }, 0);
+  // Update button colors to show which cells have multiple items
+  updateButtonColors();
 }
 
 function serialize(){
@@ -517,6 +535,7 @@ function applyData(data){
   displays.forEach(display => { display.innerHTML = ''; });
   
   computeTotals();
+  updateButtonColors();
 }
 
 async function apiFetchJson(url, opts={}){
@@ -684,8 +703,8 @@ async function downloadExcel(){
     }
     function setCellStringInline(ref, str){
       const cell = findCell(ref);
-      if (cell){
-        let t = cell.querySelector('is t');
+      if (cell && str){
+        let t = cell.querySelector('is > t');
         if (t) t.textContent = str;
       }
     }
