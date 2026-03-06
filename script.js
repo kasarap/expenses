@@ -49,7 +49,7 @@ let weeksCache = []; // [{weekEnding,businessPurpose,updatedAt}]
 let loading = false;
 let currentData = null; // Holds the full entry data (including line items)
 let currentEditAddr = null; // Address being edited in modal
-const APP_VERSION = '41'; // Update this for each revision
+const APP_VERSION = '43'; // Update this for each revision
 
 // ============ LINE-ITEM MANAGEMENT ============
 
@@ -114,7 +114,23 @@ function deleteLineItem(addr, itemId){
 
 function openLineItemModal(addr, categoryLabel, dayId){
   currentEditAddr = addr;
-  const items = getLineItems(addr);
+  
+  // Get the current input value (if any)
+  const inp = el('entryTable').querySelector(`input[data-col="${addr[0]}"][data-row="${addr.substring(1)}"]`);
+  const currentInputValue = inp ? Number(inp.value) || 0 : 0;
+  
+  let items = getLineItems(addr);
+  
+  // If no items yet but there's a value in the input, convert it to a line item
+  if (items.length === 0 && currentInputValue > 0 && !currentData?.entries?.[`${addr}_items`]) {
+    items = [{
+      id: generateItemId(),
+      amount: currentInputValue,
+      vendor: '',
+      note: ''
+    }];
+    setLineItems(addr, items);
+  }
   
   // Set up modal title
   el('modalTitle').textContent = `${categoryLabel} - ${dayId}`;
@@ -727,6 +743,12 @@ async function downloadExcel(){
     updateCell('B2', bp);
     updateCell('B7', fmtYYMMDD(sat));
 
+    // Write FROM/TO location info (row 8-9, column E)
+    const fromEl = el('entryTable').querySelector('input[data-row="8"]');
+    const toEl = el('entryTable').querySelector('input[data-row="9"]');
+    if (fromEl && fromEl.value) updateCell('E8', fromEl.value);
+    if (toEl && toEl.value) updateCell('E9', toEl.value);
+
     // Write all expense values
     allInputs().forEach(inp => {
       if (inp.dataset.computed === 'true') return;
@@ -745,10 +767,45 @@ async function downloadExcel(){
       }
     });
 
+    // Write all total cells (computed fields)
+    // Day totals
+    dayIds.forEach((dayId, idx) => {
+      const totInput = el(`tot${dayId}`);
+      if (totInput && totInput.value) {
+        const val = Number(totInput.value.replace('$',''));
+        if (val > 0) {
+          updateCell(`${dayCols[idx]}17`, val); // TOTAL COMPANY PAID
+          updateCell(`${dayCols[idx]}24`, val); // TOTAL TRAVEL
+          updateCell(`${dayCols[idx]}30`, val); // TOTAL AUTO
+          updateCell(`${dayCols[idx]}35`, val); // TOTAL TELEPHONE
+          updateCell(`${dayCols[idx]}41`, val); // TOTAL EXPENSES
+          updateCell(`${dayCols[idx]}45`, val); // TOTAL MEALS
+          updateCell(`${dayCols[idx]}50`, val); // TOTAL ENTERTAINMENT
+          updateCell(`${dayCols[idx]}51`, val); // TOTAL EXPENSES PAYABLE
+        }
+      }
+    });
+
+    // Week total
+    const weekTotalInput = el('totWEEK');
+    if (weekTotalInput && weekTotalInput.value) {
+      const val = Number(weekTotalInput.value.replace('$',''));
+      if (val > 0) {
+        updateCell('J17', val);
+        updateCell('J24', val);
+        updateCell('J30', val);
+        updateCell('J35', val);
+        updateCell('J41', val);
+        updateCell('J45', val);
+        updateCell('J50', val);
+        updateCell('J51', val);
+      }
+    }
+
     zip.file(sheetPath, new XMLSerializer().serializeToString(sheetDoc));
     const outBlob = await zip.generateAsync({type:'blob'});
 
-    // Filename: just the saved entry label without date prefix and without version
+    // Filename: just the saved entry label without date prefix
     let filename = `Week ${fmtMD(sun)} through ${fmtMD(sat)} - Angelton.xlsx`;
     
     const weekSelectEl = el('weekSelect');
