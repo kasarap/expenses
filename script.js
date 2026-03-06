@@ -535,6 +535,10 @@ function applyData(data){
     inp.value = String(map[addr]);
   });
   
+  // Clear all line item displays initially
+  const displays = el('entryTable').querySelectorAll('.cell-items-display');
+  displays.forEach(display => { display.innerHTML = ''; });
+  
   computeTotals();
 }
 
@@ -826,7 +830,7 @@ async function downloadExcel(){
     const safeBp = (bp || 'Expenses').replace(/[\/:*?"<>|]+/g,'').trim() || 'Expenses';
     const a = document.createElement('a');
     a.href = URL.createObjectURL(outBlob);
-    a.download = `Expenses_v${APP_VERSION}_Week${fmtMD(sun)}-${fmtMD(sat)}_${safeBp}.xlsx`;
+    a.download = `Expenses_v${APP_VERSION}_Week${fmtMD(sun)}through${fmtMD(sat)}_${safeBp}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
