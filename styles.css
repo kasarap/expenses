@@ -251,3 +251,248 @@ input.computed{opacity:.85}
     width: 100% !important;
   }
 }
+
+/* ========== MODAL LINE-ITEM INTERFACE (v38-MODAL) ========== */
+
+/* Cell wrapper with amount + button */
+.cell-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.currency-wrap {
+  flex: 1;
+  position: relative;
+}
+
+.currency-wrap::before {
+  content: '$';
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.currency-wrap input {
+  padding-left: 22px;
+  text-align: right;
+  width: 100%;
+}
+
+/* Small (+) button next to amount */
+.cell-add-btn {
+  padding: 6px 10px !important;
+  font-size: 14px !important;
+  line-height: 1 !important;
+  min-width: auto !important;
+  width: auto !important;
+  background: rgba(77, 163, 255, 0.12) !important;
+  border: 1px solid var(--accent) !important;
+  color: var(--accent) !important;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.2s;
+}
+
+.cell-add-btn:hover {
+  background-color: rgba(77, 163, 255, 0.2) !important;
+}
+
+/* Modal Dialog */
+.modal-dialog {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+  color: var(--text);
+  padding: 0;
+  max-width: 500px;
+  width: 92vw;
+}
+
+.modal-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.modal-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: 80vh;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  flex: 1;
+}
+
+.modal-close-btn {
+  background: transparent !important;
+  border: 1px solid var(--line) !important;
+  color: var(--text) !important;
+  padding: 6px 10px !important;
+  font-size: 14px !important;
+  cursor: pointer;
+  border-radius: 6px;
+  min-width: auto !important;
+  line-height: 1 !important;
+}
+
+.modal-close-btn:hover {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.modal-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Single item row in modal */
+.modal-item-row {
+  display: grid;
+  grid-template-columns: 80px 1fr 40px;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  background: rgba(12, 16, 22, 0.5);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.modal-amount-input {
+  padding: 8px !important;
+  text-align: right;
+  font-size: 14px;
+  border-radius: 6px;
+  width: 100%;
+}
+
+.modal-vendor-input {
+  padding: 8px !important;
+  font-size: 13px;
+  border-radius: 6px;
+  width: 100%;
+}
+
+.modal-delete-btn {
+  background: transparent !important;
+  border: 1px solid rgba(255, 92, 92, 0.3) !important;
+  color: var(--danger) !important;
+  padding: 6px 8px !important;
+  font-size: 12px !important;
+  border-radius: 4px;
+  cursor: pointer;
+  min-width: auto !important;
+  line-height: 1 !important;
+}
+
+.modal-delete-btn:hover {
+  background-color: rgba(255, 92, 92, 0.1) !important;
+}
+
+/* Add receipt row */
+.modal-add-row {
+  padding: 8px 0;
+  text-align: center;
+}
+
+.modal-add-btn {
+  background: rgba(77, 163, 255, 0.08) !important;
+  border: 1px solid var(--accent) !important;
+  color: var(--accent) !important;
+  padding: 8px 12px !important;
+  font-size: 13px !important;
+  border-radius: 6px;
+  cursor: pointer;
+  min-width: auto !important;
+}
+
+.modal-add-btn:hover {
+  background-color: rgba(77, 163, 255, 0.15) !important;
+}
+
+/* Modal footer */
+.modal-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+  gap: 12px;
+}
+
+.modal-total-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.modal-total-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.modal-total-amount {
+  font-size: 18px;
+  color: var(--accent);
+  min-width: 80px;
+  text-align: right;
+}
+
+.modal-save-btn {
+  background: linear-gradient(180deg, #1b76ff, #1357c8) !important;
+  border-color: #2a6fd3 !important;
+  color: white !important;
+  padding: 8px 16px !important;
+  font-size: 13px !important;
+  border-radius: 6px;
+  cursor: pointer;
+  min-width: auto !important;
+}
+
+.modal-save-btn:hover {
+  opacity: 0.9;
+}
+
+/* Responsive for mobile */
+@media (max-width: 600px) {
+  .modal-item-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  
+  .modal-footer {
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  .modal-total-section {
+    width: 100%;
+    justify-content: space-between;
+  }
+  
+  .modal-save-btn {
+    width: 100%;
+  }
+}

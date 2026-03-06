@@ -1,6 +1,6 @@
 
 // Weekly Expenses (Cloudflare Pages + KV)
-// v38: Added line-item detail rows for multiple receipts per category/day
+// v38-MODAL: Line-item modal for multiple receipts per category/day
 // Sync behaves like test-entry-log:
 // - Sync Name is a namespace (same sync across multiple weeks)
 // - On page load (if Sync exists) auto-load most recent week for that sync
@@ -48,7 +48,7 @@ let currentWeekEnding = ''; // YYYY-MM-DD
 let weeksCache = []; // [{weekEnding,businessPurpose,updatedAt}]
 let loading = false;
 let currentData = null; // Holds the full entry data (including line items)
-let expandedRows = new Set(); // Track which rows are expanded (stores row numbers)
+let currentEditAddr = null; // Address being edited in modal
 
 // ============ LINE-ITEM MANAGEMENT ============
 
@@ -108,10 +108,90 @@ function deleteLineItem(addr, itemId){
   setLineItems(addr, items);
 }
 
-// Check if a cell has been itemized (has line items)
-function isItemized(addr){
-  return Array.isArray(currentData?.entries?.[`${addr}_items`]) &&
-         currentData.entries[`${addr}_items`].length > 0;
+// ============ MODAL MANAGEMENT ============
+
+function openLineItemModal(addr, categoryLabel, dayId){
+  currentEditAddr = addr;
+  const items = getLineItems(addr);
+  
+  // Set up modal title
+  el('modalTitle').textContent = `${categoryLabel} - ${dayId}`;
+  
+  // Build items list
+  const itemsList = el('modalItemsList');
+  itemsList.innerHTML = '';
+  
+  items.forEach(item => {
+    const itemRow = document.createElement('div');
+    itemRow.className = 'modal-item-row';
+    itemRow.dataset.itemId = item.id;
+    
+    const amountInput = document.createElement('input');
+    amountInput.type = 'number';
+    amountInput.inputMode = 'decimal';
+    amountInput.placeholder = '0.00';
+    amountInput.value = item.amount || '';
+    amountInput.className = 'modal-amount-input';
+    amountInput.addEventListener('input', (e) => {
+      updateLineItem(addr, item.id, {amount: Number(e.target.value) || 0});
+      updateModalTotal();
+    });
+    
+    const vendorInput = document.createElement('input');
+    vendorInput.type = 'text';
+    vendorInput.placeholder = 'Vendor (optional)';
+    vendorInput.value = item.vendor || '';
+    vendorInput.className = 'modal-vendor-input';
+    vendorInput.addEventListener('input', (e) => {
+      updateLineItem(addr, item.id, {vendor: e.target.value});
+    });
+    
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'modal-delete-btn';
+    deleteBtn.textContent = '✕';
+    deleteBtn.addEventListener('click', () => {
+      deleteLineItem(addr, item.id);
+      itemRow.remove();
+      updateModalTotal();
+    });
+    
+    itemRow.appendChild(amountInput);
+    itemRow.appendChild(vendorInput);
+    itemRow.appendChild(deleteBtn);
+    itemsList.appendChild(itemRow);
+  });
+  
+  // Add new item button
+  const addRow = document.createElement('div');
+  addRow.className = 'modal-add-row';
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'modal-add-btn';
+  addBtn.textContent = '+ Add receipt';
+  addBtn.addEventListener('click', () => {
+    addLineItem(addr, 0, '', '');
+    openLineItemModal(addr, categoryLabel, dayId); // Refresh modal
+  });
+  addRow.appendChild(addBtn);
+  itemsList.appendChild(addRow);
+  
+  // Show modal
+  updateModalTotal();
+  el('lineItemModal').showModal();
+}
+
+function updateModalTotal(){
+  if (!currentEditAddr) return;
+  const items = getLineItems(currentEditAddr);
+  const total = items.reduce((sum, item)=> sum + (Number(item.amount) || 0), 0);
+  el('modalTotal').textContent = total > 0 ? `$${total.toFixed(2)}` : '$0.00';
+}
+
+function closeLineItemModal(){
+  el('lineItemModal').close();
+  currentEditAddr = null;
+  computeTotals();
 }
 
 // ============ END LINE-ITEM MANAGEMENT ============
@@ -157,7 +237,6 @@ function fmtYYMMDD(d){
 }
 
 function setHeaderDatesFromSunday(sundayISO){
-  // sundayISO: YYYY-MM-DD
   const dateEls = {
     SUN: el('dateSUN'), MON: el('dateMON'), TUE: el('dateTUE'),
     WED: el('dateWED'), THU: el('dateTHU'), FRI: el('dateFRI'), SAT: el('dateSAT')
@@ -200,44 +279,20 @@ function buildTable(){
     const tr=document.createElement('tr');
     const tdLabel=document.createElement('td');
     tdLabel.className='stickyLabel';
-
-    // Add expand button for currency categories (they can have multiple receipts)
-    const labelContainer = document.createElement('div');
-    labelContainer.className = 'label-container';
-    labelContainer.style.display = 'flex';
-    labelContainer.style.alignItems = 'center';
-    labelContainer.style.gap = '8px';
-
-    const labelText = document.createElement('span');
-    labelText.textContent = r.label;
-    labelContainer.appendChild(labelText);
-
-    // Add expand button only for currency rows (meals, travel, etc.)
-    if (r.type === 'currency' && !r.computed){
-      const expandBtn = document.createElement('button');
-      expandBtn.className = 'expand-btn';
-      expandBtn.type = 'button';
-      expandBtn.textContent = '▼';
-      expandBtn.style.padding = '4px 8px';
-      expandBtn.style.fontSize = '12px';
-      expandBtn.style.lineHeight = '1';
-      expandBtn.style.minWidth = 'auto';
-      expandBtn.dataset.row = String(r.row);
-      expandBtn.addEventListener('click', (e)=>{
-        e.preventDefault();
-        toggleRowExpansion(r.row);
-      });
-      labelContainer.appendChild(expandBtn);
-    }
-
-    tdLabel.appendChild(labelContainer);
+    tdLabel.textContent=r.label;
     tr.appendChild(tdLabel);
 
     for (let i=0;i<7;i++){
       const td=document.createElement('td');
+      const col = dayCols[i];
+      const dayId = dayIds[i];
+      
+      const cellWrapper = document.createElement('div');
+      cellWrapper.className = 'cell-wrapper';
+      
       const inp=document.createElement('input');
       inp.dataset.row=String(r.row);
-      inp.dataset.col=dayCols[i];
+      inp.dataset.col=col;
       inp.dataset.type=r.type;
       if (r.computed){
         inp.dataset.computed='true';
@@ -265,155 +320,29 @@ function buildTable(){
         const wrap=document.createElement('div');
         wrap.className='currency-wrap';
         wrap.appendChild(inp);
-        td.appendChild(wrap);
+        cellWrapper.appendChild(wrap);
+        
+        // Add (+) button for currency cells only
+        if (!r.computed){
+          const addBtn = document.createElement('button');
+          addBtn.type = 'button';
+          addBtn.className = 'cell-add-btn';
+          addBtn.textContent = '+';
+          addBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            openLineItemModal(`${col}${r.row}`, r.label, dayId);
+          });
+          cellWrapper.appendChild(addBtn);
+        }
       } else {
-        td.appendChild(inp);
+        cellWrapper.appendChild(inp);
       }
+      
+      td.appendChild(cellWrapper);
       tr.appendChild(td);
     }
     tbody.appendChild(tr);
   });
-}
-
-function toggleRowExpansion(rowNum){
-  const rowKey = String(rowNum);
-  if (expandedRows.has(rowKey)){
-    expandedRows.delete(rowKey);
-  } else {
-    expandedRows.add(rowKey);
-  }
-  rebuildDetailRows();
-}
-
-function rebuildDetailRows(){
-  const tbody = el('entryTable').querySelector('tbody');
-  const detailRows = tbody.querySelectorAll('tr[data-detail-row="true"]');
-  detailRows.forEach(row=> row.remove());
-  
-  rows.forEach(r=>{
-    if (!expandedRows.has(String(r.row))) return;
-    if (r.type !== 'currency' || r.computed) return;
-    
-    const mainRow = tbody.querySelector(`tr input[data-row="${r.row}"][data-col="C"]`)?.closest('tr');
-    if (!mainRow) return;
-    
-    const detailRow = createDetailRow(r.row);
-    mainRow.insertAdjacentElement('afterend', detailRow);
-  });
-}
-
-function createDetailRow(rowNum){
-  const tr = document.createElement('tr');
-  tr.setAttribute('data-detail-row', 'true');
-  tr.setAttribute('data-for-row', String(rowNum));
-  tr.className = 'detail-row-container';
-  
-  const tdLabel = document.createElement('td');
-  tdLabel.className = 'stickyLabel detail-label';
-  tdLabel.textContent = '';
-  tr.appendChild(tdLabel);
-  
-  const tdContent = document.createElement('td');
-  tdContent.colSpan = 7;
-  tdContent.className = 'detail-content';
-  
-  const detailsContainer = document.createElement('div');
-  detailsContainer.className = 'line-items-container';
-  
-  dayCols.forEach((col, dayIdx)=>{
-    const addr = `${col}${rowNum}`;
-    const dayId = dayIds[dayIdx];
-    
-    const dayContainer = document.createElement('div');
-    dayContainer.className = 'day-line-items';
-    dayContainer.dataset.addr = addr;
-    dayContainer.dataset.dayId = dayId;
-    
-    const dayHeader = document.createElement('div');
-    dayHeader.className = 'day-header';
-    dayHeader.textContent = dayId;
-    dayContainer.appendChild(dayHeader);
-    
-    const itemsList = document.createElement('div');
-    itemsList.className = 'items-list';
-    itemsList.dataset.addr = addr;
-    
-    const items = getLineItems(addr);
-    items.forEach(item=>{
-      const itemEl = createLineItemElement(addr, item);
-      itemsList.appendChild(itemEl);
-    });
-    
-    dayContainer.appendChild(itemsList);
-    
-    const addBtn = document.createElement('button');
-    addBtn.type = 'button';
-    addBtn.className = 'add-item-btn';
-    addBtn.textContent = '+ Add';
-    addBtn.style.fontSize = '12px';
-    addBtn.style.padding = '4px 8px';
-    addBtn.addEventListener('click', ()=>{
-      addLineItem(addr, 0, '', '');
-      rebuildDetailRows();
-      computeTotals();
-    });
-    dayContainer.appendChild(addBtn);
-    
-    detailsContainer.appendChild(dayContainer);
-  });
-  
-  tdContent.appendChild(detailsContainer);
-  tr.appendChild(tdContent);
-  
-  return tr;
-}
-
-function createLineItemElement(addr, item){
-  const itemEl = document.createElement('div');
-  itemEl.className = 'line-item';
-  itemEl.dataset.itemId = item.id;
-  
-  const amountInput = document.createElement('input');
-  amountInput.type = 'number';
-  amountInput.inputMode = 'decimal';
-  amountInput.placeholder = '0.00';
-  amountInput.value = item.amount || '';
-  amountInput.className = 'line-item-amount';
-  amountInput.style.width = '80px';
-  amountInput.addEventListener('input', (e)=>{
-    const newAmount = Number(e.target.value) || 0;
-    updateLineItem(addr, item.id, {amount: newAmount});
-    computeTotals();
-  });
-  
-  const vendorInput = document.createElement('input');
-  vendorInput.type = 'text';
-  vendorInput.placeholder = 'Vendor (optional)';
-  vendorInput.value = item.vendor || '';
-  vendorInput.className = 'line-item-vendor';
-  vendorInput.style.flex = '1';
-  vendorInput.style.minWidth = '120px';
-  vendorInput.addEventListener('input', (e)=>{
-    updateLineItem(addr, item.id, {vendor: e.target.value});
-  });
-  
-  const deleteBtn = document.createElement('button');
-  deleteBtn.type = 'button';
-  deleteBtn.className = 'delete-item-btn';
-  deleteBtn.textContent = '✕';
-  deleteBtn.style.padding = '4px 8px';
-  deleteBtn.style.color = 'var(--danger)';
-  deleteBtn.addEventListener('click', ()=>{
-    deleteLineItem(addr, item.id);
-    rebuildDetailRows();
-    computeTotals();
-  });
-  
-  itemEl.appendChild(amountInput);
-  itemEl.appendChild(vendorInput);
-  itemEl.appendChild(deleteBtn);
-  
-  return itemEl;
 }
 
 function gridKeydown(e){
@@ -456,8 +385,6 @@ function clearAllNew(){
   renderSync();
   weeksCache=[];
   renderWeeksDropdown();
-  expandedRows.clear();
-  rebuildDetailRows();
   setButtonsEnabled();
   setStatus('Cleared. Set Sunday date and Sync Name on Save.');
 }
@@ -548,8 +475,6 @@ function applyData(data){
     if (map[addr]==null) return;
     inp.value = String(map[addr]);
   });
-  
-  expandedRows.clear();
   
   computeTotals();
 }
@@ -714,7 +639,6 @@ async function downloadExcel(){
       zip.file(wbPath, new XMLSerializer().serializeToString(wbDoc));
     }catch(e){ /* ignore */ }
 
-
     const sheetPath = 'xl/worksheets/sheet1.xml';
     const sheetXml = await zip.file(sheetPath).async('string');
     const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml');
@@ -865,7 +789,6 @@ async function changeSync(){
 
 async function init(){
   buildTable();
-  rebuildDetailRows();
   computeTotals();
   renderSync();
 
@@ -876,6 +799,10 @@ async function init(){
   el('btnClear').addEventListener('click', clearAllNew);
   el('btnDownload').addEventListener('click', downloadExcel);
   el('btnChangeSync').addEventListener('click', changeSync);
+  
+  // Modal buttons
+  el('modalCloseBtn').addEventListener('click', closeLineItemModal);
+  el('lineItemModal').addEventListener('cancel', closeLineItemModal);
 
   if (currentSync){
     try{ await loadWeeksForSync(true); } catch {}
