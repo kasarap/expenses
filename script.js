@@ -49,7 +49,7 @@ let weeksCache = []; // [{weekEnding,businessPurpose,updatedAt}]
 let loading = false;
 let currentData = null; // Holds the full entry data (including line items)
 let currentEditAddr = null; // Address being edited in modal
-const APP_VERSION = '58'; // Update this for each revision
+const APP_VERSION = '59'; // Update this for each revision
 
 // ============ LINE-ITEM MANAGEMENT ============
 
@@ -703,12 +703,16 @@ async function downloadExcel(){
     const sheetXml = await zip.file(sheetPath).async('string');
     const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml');
 
-    // Only update value nodes in already-existing cells — never add new ones
+    // getElementsByTagName avoids XML namespace issues that break querySelector
     function updateCellValue(cellRef, value) {
-      const cell = sheetDoc.querySelector(`c[r="${cellRef}"]`);
+      const cells = sheetDoc.getElementsByTagName('c');
+      let cell = null;
+      for (let i = 0; i < cells.length; i++) {
+        if (cells[i].getAttribute('r') === cellRef) { cell = cells[i]; break; }
+      }
       if (!cell) return;
-      const v = cell.querySelector('v');
-      if (v) v.textContent = String(value);
+      const vs = cell.getElementsByTagName('v');
+      if (vs.length > 0) vs[0].textContent = String(value);
     }
 
     const bp  = (el('businessPurpose')?.value || '').trim();
