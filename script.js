@@ -700,22 +700,6 @@ async function downloadExcel(){
     const ab = await res.arrayBuffer();
     const zip = await JSZip.loadAsync(ab);
 
-    try{
-      const wbPath = 'xl/workbook.xml';
-      const wbXml = await zip.file(wbPath).async('string');
-      const wbDoc = new DOMParser().parseFromString(wbXml, 'application/xml');
-      const wbNS = wbDoc.documentElement.namespaceURI;
-      let calcPr = wbDoc.getElementsByTagNameNS(wbNS, 'calcPr')[0] || wbDoc.getElementsByTagName('calcPr')[0];
-      if (!calcPr){
-        calcPr = wbDoc.createElementNS(wbNS, 'calcPr');
-        wbDoc.documentElement.appendChild(calcPr);
-      }
-      calcPr.setAttribute('calcMode','auto');
-      calcPr.setAttribute('fullCalcOnLoad','1');
-      zip.file(wbPath, new XMLSerializer().serializeToString(wbDoc));
-    }catch(e){ /* ignore */ }
-
-
     const sheetPath = 'xl/worksheets/sheet1.xml';
     const sheetXml = await zip.file(sheetPath).async('string');
     const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml');
