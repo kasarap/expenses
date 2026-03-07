@@ -49,7 +49,7 @@ let weeksCache = []; // [{weekEnding,businessPurpose,updatedAt}]
 let loading = false;
 let currentData = null; // Holds the full entry data (including line items)
 let currentEditAddr = null; // Address being edited in modal
-const APP_VERSION = '47'; // Update this for each revision
+const APP_VERSION = '48'; // Update this for each revision
 
 // ============ LINE-ITEM MANAGEMENT ============
 
@@ -735,7 +735,6 @@ async function downloadExcel(){
     
     // Write dates to row 7 (DATE row - one for each day)
     const dayLabels = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
-    const sun = computeSundayFromWeekEnding(currentWeekEnding);
     for (let i = 0; i < 7; i++) {
       const dayDate = new Date(sun);
       dayDate.setDate(dayDate.getDate() + i);
