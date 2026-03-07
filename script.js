@@ -49,7 +49,7 @@ let weeksCache = []; // [{weekEnding,businessPurpose,updatedAt}]
 let loading = false;
 let currentData = null; // Holds the full entry data (including line items)
 let expandedRows = new Set(); // Track which rows are expanded (stores row numbers)
-const APP_VERSION = '52'; // Update this for each revision
+const APP_VERSION = '53'; // Update this for each revision
 
 // ============ LINE-ITEM MANAGEMENT ============
 
@@ -706,97 +706,72 @@ async function downloadExcel(){
     const xmlNS = sheetDoc.documentElement.namespaceURI;
 
     const bp = (el('businessPurpose')?.value || '').trim();
-    const satISO = currentWeekEnding;
-    const sat = parseISODate(satISO);
-    const sun = computeSundayFromWeekEnding(satISO);
+    const sat = parseISODate(currentWeekEnding);
+    const sun = computeSundayFromWeekEnding(currentWeekEnding);
 
-    function qsa(node, sel){ return Array.from(node.querySelectorAll(sel)); }
-    function findCell(ref){ return sheetDoc.querySelector(`c[r="${ref}"]`); }
-    function ensureRow(rowNum){
-      const sheetData = sheetDoc.getElementsByTagName('sheetData')[0];
-      let row = sheetDoc.querySelector(`row[r="${rowNum}"]`);
-      if (row) return row;
-      row = sheetDoc.createElementNS(xmlNS, 'row');
-      row.setAttribute('r', String(rowNum));
-      const rows = qsa(sheetData, 'row');
-      const after = rows.find(r => parseInt(r.getAttribute('r'),10) > rowNum);
-      if (after) sheetData.insertBefore(row, after);
-      else sheetData.appendChild(row);
-      return row;
-    }
-    function colToNum(col){
-      let n=0;
-      for (const ch of col){ n = n*26 + (ch.charCodeAt(0)-64); }
-      return n;
-    }
-    function splitRef(ref){
-      const m = ref.match(/^([A-Z]+)(\d+)$/);
-      return {col:m[1], row:parseInt(m[2],10)};
-    }
-    function ensureCell(ref){
-      let cell = findCell(ref);
-      if (cell) return cell;
-      const {col,row} = splitRef(ref);
-      const rowEl = ensureRow(row);
-      cell = sheetDoc.createElementNS(xmlNS,'c');
-      cell.setAttribute('r', ref);
-      const cells = qsa(rowEl,'c');
-      const target = colToNum(col);
-      const after = cells.find(c => colToNum(splitRef(c.getAttribute('r')).col) > target);
-      if (after) rowEl.insertBefore(cell, after);
-      else rowEl.appendChild(cell);
-      return cell;
-    }
-    function setCellNumber(ref, num, keepFormula=false){
-      const cell = ensureCell(ref);
-      cell.removeAttribute('t');
+    // Simple function to update cell values
+    function updateCell(cellRef, value) {
+      const cell = sheetDoc.querySelector(`c[r="${cellRef}"]`);
+      if (!cell) return;
+      
       let v = cell.querySelector('v');
-      if (!v){ v = sheetDoc.createElementNS(xmlNS,'v'); cell.appendChild(v); }
-      v.textContent = String(num);
-      if (!keepFormula){
-        const f = cell.querySelector('f');
-        if (f) f.remove();
+      if (!v) {
+        v = sheetDoc.createElementNS(xmlNS, 'v');
+        cell.appendChild(v);
       }
-    }
-    function setCellStringInline(ref, str){
-      const cell = ensureCell(ref);
-      cell.setAttribute('t','inlineStr');
-      let is = cell.querySelector('is');
-      if (!is){ is = sheetDoc.createElementNS(xmlNS,'is'); cell.appendChild(is); }
-      is.innerHTML = '';
-      const t = sheetDoc.createElementNS(xmlNS,'t');
-      t.textContent = str;
-      is.appendChild(t);
-    }
-    setCellStringInline('B7', satISO);
-
-    const payload = serialize();
-    for (const [addr,val] of Object.entries(payload.entries || {})){
-      if (addr.endsWith('_items')) continue;
-      if (typeof val === 'number') setCellNumber(addr, val);
-      else setCellStringInline(addr, String(val));
+      v.textContent = String(value);
     }
 
-    let mileageWeekTotal = 0;
-    for (let i=0;i<7;i++){
-      const miles = Number(payload.entries?.[`${dayCols[i]}10`] ?? 0);
-      const amt = (Number.isFinite(miles) ? miles : 0) * MILEAGE_RATE;
-      if (amt > 0){
-        mileageWeekTotal += amt;
-        setCellNumber(`${dayCols[i]}29`, Number(amt.toFixed(2)), true);
+    // Write business purpose to H5
+    updateCell('H5', bp);
+    
+    // Write week ending to E5
+    updateCell('E5', fmtYYMMDD(sat));
+    
+    // Write dates to row 7 (one for each day, formatted as m/d/yyyy)
+    for (let i = 0; i < 7; i++) {
+      const dayDate = new Date(sun);
+      dayDate.setDate(dayDate.getDate() + i);
+      const month = (dayDate.getMonth() + 1);
+      const day = dayDate.getDate();
+      const year = dayDate.getFullYear();
+      const dateStr = `${month}/${day}/${year}`;
+      updateCell(`${dayCols[i]}7`, dateStr);
+    }
+
+    // Write all expense values from inputs
+    allInputs().forEach(inp => {
+      if (inp.dataset.computed === 'true') return;
+      const val = inp.value ? inp.value.trim() : '';
+      if (!val) return;
+
+      const addr = `${inp.dataset.col}${inp.dataset.row}`;
+      const n = Number(val);
+      
+      if (Number.isFinite(n)) {
+        updateCell(addr, n);
       }
-    }
-    if (mileageWeekTotal > 0){
-      setCellNumber(`J29`, Number(mileageWeekTotal.toFixed(2)), true);
-    }
+    });
 
     zip.file(sheetPath, new XMLSerializer().serializeToString(sheetDoc));
     const outBlob = await zip.generateAsync({type:'blob'});
 
-    const safeBp = (bp || 'Expenses').replace(/[\/:*?"<>|]+/g,'').trim() || 'Expenses';
+    // Filename from saved entry
+    let filename = `Week ${fmtMD(sun)} through ${fmtMD(sat)} - Angelton.xlsx`;
+    
+    const weekSelectEl = el('weekSelect');
+    if (weekSelectEl && weekSelectEl.value) {
+      const selectedOption = weekSelectEl.querySelector(`option[value="${weekSelectEl.value}"]`);
+      if (selectedOption) {
+        let optionText = selectedOption.textContent.trim();
+        optionText = optionText.replace(/^\d{2}\.\d{2}\.\d{2}\s*-\s*/, '').trim();
+        filename = optionText + '.xlsx';
+      }
+    }
+
     const a = document.createElement('a');
     a.href = URL.createObjectURL(outBlob);
-    a.download = `Week ${fmtMD(sun)} through ${fmtMD(sat)} - ${safeBp}.xlsx`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -804,7 +779,7 @@ async function downloadExcel(){
     setStatus('Excel downloaded.');
   } catch (e){
     console.error(e);
-    setStatus('Excel export failed.');
+    setStatus('Excel export failed: ' + e.message);
   }
 }
 
