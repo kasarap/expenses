@@ -110,27 +110,29 @@
 </section>
   </main>
 
-  <!-- Line Item Modal -->
-  <dialog id="lineItemModal" class="modal-dialog">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3 id="modalTitle">Category - Day</h3>
-        <button id="modalCloseBtn" type="button" class="modal-close-btn">✕</button>
-      </div>
-      
-      <div class="modal-body">
-        <div id="modalItemsList" class="modal-items-list"></div>
-      </div>
-      
-      <div class="modal-footer">
-        <div class="modal-total-section">
-          <span class="modal-total-label">Total:</span>
-          <span id="modalTotal" class="modal-total-amount">$0.00</span>
+  <!-- Line Item Modal (div-based for iOS Safari compatibility) -->
+  <div id="modalOverlay" class="modal-overlay" style="display:none;">
+    <div id="lineItemModal" class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 id="modalTitle">Category - Day</h3>
+          <button id="modalCloseBtn" type="button" class="modal-close-btn">✕</button>
         </div>
-        <button id="modalSaveBtn" type="button" class="modal-save-btn" onclick="closeLineItemModal()">Done</button>
+        
+        <div class="modal-body">
+          <div id="modalItemsList" class="modal-items-list"></div>
+        </div>
+        
+        <div class="modal-footer">
+          <div class="modal-total-section">
+            <span class="modal-total-label">Total:</span>
+            <span id="modalTotal" class="modal-total-amount">$0.00</span>
+          </div>
+          <button id="modalSaveBtn" type="button" class="modal-save-btn" onclick="closeLineItemModal()">Done</button>
+        </div>
       </div>
     </div>
-  </dialog>
+  </div>
 
   <script src="vendor/jszip.min.js"></script>
   <script>if(typeof JSZip==='undefined'){document.write('<script src="jszip.min.js"><\/script>');}</script>

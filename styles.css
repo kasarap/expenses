@@ -339,6 +339,19 @@ input.computed{opacity:.85}
   background-color: rgba(76, 175, 80, 0.3) !important;
 }
 
+/* Modal Overlay — covers full screen, works on iOS Safari */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
 /* Modal Dialog */
 .modal-dialog {
   border: 1px solid var(--line);
@@ -347,39 +360,17 @@ input.computed{opacity:.85}
   color: var(--text);
   padding: 0;
   max-width: 500px;
-  width: 92vw;
-  /* Fix iOS Safari centering */
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  margin: 0;
-  /* Prevent overflow off screen */
-  max-height: 85dvh;
-  max-height: 85vh;
+  width: 100%;
+  max-height: 80vh;
   overflow: hidden;
-}
-
-.modal-dialog::backdrop {
-  background: rgba(0, 0, 0, 0.6);
-}
-
-/* iOS Safari doesn't support ::backdrop on <dialog>, use this workaround */
-.modal-dialog[open]::before {
-  content: '';
-  display: block;
-  position: fixed;
-  inset: -100vh -100vw;
-  background: rgba(0, 0, 0, 0.6);
-  z-index: -1;
+  position: relative;
+  z-index: 1001;
 }
 
 .modal-content {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  max-height: 85dvh;
-  max-height: 85vh;
+  max-height: 80vh;
 }
 
 .modal-header {
@@ -534,11 +525,19 @@ input.computed{opacity:.85}
 
 /* Responsive for mobile */
 @media (max-width: 600px) {
+  .modal-overlay {
+    padding: 12px;
+    align-items: flex-end; /* sheet slides up from bottom on mobile */
+  }
+
   .modal-dialog {
-    width: 96vw;
-    border-radius: 12px;
-    /* Sit a bit higher to clear keyboard */
-    top: 45%;
+    width: 100%;
+    border-radius: 16px 16px 10px 10px;
+    max-height: 75vh;
+  }
+
+  .modal-content {
+    max-height: 75vh;
   }
 
   .modal-item-row {
@@ -558,7 +557,7 @@ input.computed{opacity:.85}
   
   .modal-save-btn {
     width: 100%;
-    padding: 12px 16px !important; /* Larger tap target */
+    padding: 12px 16px !important;
     font-size: 15px !important;
   }
 

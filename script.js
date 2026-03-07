@@ -196,8 +196,8 @@ function openLineItemModal(addr, categoryLabel, dayId){
   
   // Show modal
   updateModalTotal();
-  el('lineItemModal').showModal();
-  // Lock body scroll on mobile when modal is open
+  const overlay = el('modalOverlay');
+  overlay.style.display = 'flex';
   document.body.style.overflow = 'hidden';
 }
 
@@ -227,7 +227,7 @@ function closeLineItemModal(){
     }
   }
   
-  el('lineItemModal').close();
+  el('modalOverlay').style.display = 'none';
   // Restore body scroll
   document.body.style.overflow = '';
   currentEditAddr = null;
@@ -930,15 +930,9 @@ async function init(){
   
   // Modal buttons
   el('modalCloseBtn').addEventListener('click', closeLineItemModal);
-  el('lineItemModal').addEventListener('cancel', closeLineItemModal);
-  // Close when tapping the backdrop (native <dialog> doesn't do this on mobile)
-  el('lineItemModal').addEventListener('click', (e) => {
-    const rect = el('lineItemModal').getBoundingClientRect();
-    const clickedOutside = (
-      e.clientX < rect.left || e.clientX > rect.right ||
-      e.clientY < rect.top  || e.clientY > rect.bottom
-    );
-    if (clickedOutside) closeLineItemModal();
+  // Close when tapping the overlay backdrop (outside the modal box)
+  el('modalOverlay').addEventListener('click', (e) => {
+    if (e.target === el('modalOverlay')) closeLineItemModal();
   });
 
   if (currentSync){
