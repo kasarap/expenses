@@ -49,7 +49,7 @@ let weeksCache = []; // [{weekEnding,businessPurpose,updatedAt}]
 let loading = false;
 let currentData = null; // Holds the full entry data (including line items)
 let currentEditAddr = null; // Address being edited in modal
-const APP_VERSION = '56'; // Update this for each revision
+const APP_VERSION = '57'; // Update this for each revision
 
 // ============ LINE-ITEM MANAGEMENT ============
 
@@ -685,7 +685,8 @@ async function deleteWeek(){
 
 async function downloadExcel(){
   if (!currentWeekEnding){ setStatus('Enter a Sunday date first.'); return; }
-  
+  if (!ensureSync()) { setStatus('Sync Name not set.'); return; }
+
   setStatus('Building Excel…');
   try{
     if (typeof JSZip === 'undefined') throw new Error('JSZip library not loaded');
@@ -696,14 +697,63 @@ async function downloadExcel(){
     }
     if (!res || !res.ok) throw new Error('Template not found');
     const ab = await res.arrayBuffer();
-    const outBlob = new Blob([ab], {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const zip = await JSZip.loadAsync(ab);
 
-    const bp = el('businessPurpose').value || 'Expenses';
+    const sheetPath = 'xl/worksheets/sheet1.xml';
+    const sheetXml = await zip.file(sheetPath).async('string');
+    const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml');
+
+    // Only update value nodes in existing cells
+    function updateCellValue(cellRef, value) {
+      const cell = sheetDoc.querySelector(`c[r="${cellRef}"]`);
+      if (!cell) return;
+      
+      let v = cell.querySelector('v');
+      if (v) {
+        v.textContent = String(value);
+      }
+    }
+
+    const bp = (el('businessPurpose')?.value || '').trim();
     const sat = parseISODate(currentWeekEnding);
     const sun = computeSundayFromWeekEnding(currentWeekEnding);
 
-    // Filename
-    let filename = `Week ${fmtMD(sun)} through ${fmtMD(sat)} - ${bp}.xlsx`;
+    // Write values
+    updateCellValue('H5', bp);
+    updateCellValue('E5', fmtYYMMDD(sat));
+
+    // Write dates to row 7
+    for (let i = 0; i < 7; i++) {
+      const dayDate = new Date(sun);
+      dayDate.setDate(dayDate.getDate() + i);
+      const month = (dayDate.getMonth() + 1);
+      const day = dayDate.getDate();
+      const year = dayDate.getFullYear();
+      updateCellValue(`${dayCols[i]}7`, `${month}/${day}/${year}`);
+    }
+
+    // Write all expense values
+    allInputs().forEach(inp => {
+      if (inp.dataset.computed === 'true') return;
+      const val = inp.value ? inp.value.trim() : '';
+      if (!val) return;
+
+      const addr = `${inp.dataset.col}${inp.dataset.row}`;
+
+      if (inp.dataset.type === 'number' || inp.dataset.type === 'currency') {
+        const n = Number(val);
+        if (Number.isFinite(n) && n > 0) {
+          updateCellValue(addr, n);
+        }
+      } else {
+        updateCellValue(addr, val);
+      }
+    });
+
+    zip.file(sheetPath, new XMLSerializer().serializeToString(sheetDoc));
+    const outBlob = await zip.generateAsync({type:'blob'});
+
+    let filename = `Week ${fmtMD(sun)} through ${fmtMD(sat)} - Angelton.xlsx`;
     
     const weekSelectEl = el('weekSelect');
     if (weekSelectEl && weekSelectEl.value) {
