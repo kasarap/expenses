@@ -49,7 +49,7 @@ let weeksCache = []; // [{weekEnding,businessPurpose,updatedAt}]
 let loading = false;
 let currentData = null; // Holds the full entry data (including line items)
 let currentEditAddr = null; // Address being edited in modal
-const APP_VERSION = '46'; // Update this for each revision
+const APP_VERSION = '47'; // Update this for each revision
 
 // ============ LINE-ITEM MANAGEMENT ============
 
@@ -708,34 +708,22 @@ async function downloadExcel(){
     const sat = parseISODate(currentWeekEnding);
     const sun = computeSundayFromWeekEnding(currentWeekEnding);
 
-    // Function to properly update cells
+    // Function to update cell values while preserving formulas
     function updateCell(cellRef, value) {
       const cell = sheetDoc.querySelector(`c[r="${cellRef}"]`);
       if (!cell) return;
       
+      // Just update the value, don't touch attributes or formulas
+      let v = cell.querySelector('v');
+      if (!v) {
+        v = sheetDoc.createElementNS(xmlNS, 'v');
+        cell.appendChild(v);
+      }
+      
       if (typeof value === 'number') {
-        // Number type
-        cell.setAttribute('t', 'n');
-        let v = cell.querySelector('v');
-        if (!v) {
-          v = sheetDoc.createElementNS(xmlNS, 'v');
-          cell.appendChild(v);
-        }
         v.textContent = String(value);
-      } else if (typeof value === 'string' && value) {
-        // String type (inlineStr)
-        cell.setAttribute('t', 'inlineStr');
-        let is = cell.querySelector('is');
-        if (!is) {
-          is = sheetDoc.createElementNS(xmlNS, 'is');
-          cell.appendChild(is);
-        }
-        let t = is.querySelector('t');
-        if (!t) {
-          t = sheetDoc.createElementNS(xmlNS, 't');
-          is.appendChild(t);
-        }
-        t.textContent = String(value);
+      } else if (typeof value === 'string') {
+        v.textContent = String(value);
       }
     }
 
