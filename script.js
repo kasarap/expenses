@@ -735,18 +735,27 @@ async function downloadExcel(){
     // Write all expense values
     allInputs().forEach(inp => {
       if (inp.dataset.computed === 'true') return;
-      const val = inp.value ? inp.value.trim() : '';
-      if (!val) return;
-
+      
       const addr = `${inp.dataset.col}${inp.dataset.row}`;
-
-      if (inp.dataset.type === 'number' || inp.dataset.type === 'currency') {
-        const n = Number(val);
-        if (Number.isFinite(n) && n > 0) {
-          updateCellValue(addr, n);
-        }
+      let cellTotal = 0;
+      
+      // Check if this cell has _items
+      const items = currentData?.entries?.[`${addr}_items`];
+      if (Array.isArray(items) && items.length > 0) {
+        // Sum the items
+        cellTotal = items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
       } else {
-        updateCellValue(addr, val);
+        // No items, use the input value
+        const val = inp.value ? inp.value.trim() : '';
+        if (!val) return;
+        const n = Number(val);
+        if (!Number.isFinite(n) || n <= 0) return;
+        cellTotal = n;
+      }
+      
+      // Write the total to Excel
+      if (cellTotal > 0) {
+        updateCellValue(addr, cellTotal);
       }
     });
 
