@@ -49,7 +49,7 @@ let weeksCache = []; // [{weekEnding,businessPurpose,updatedAt}]
 let loading = false;
 let currentData = null; // Holds the full entry data (including line items)
 let currentEditAddr = null; // Address being edited in modal
-const APP_VERSION = '44'; // Update this for each revision
+const APP_VERSION = '46'; // Update this for each revision
 
 // ============ LINE-ITEM MANAGEMENT ============
 
@@ -739,14 +739,21 @@ async function downloadExcel(){
       }
     }
 
-    // Write business purpose only (not date to B7 - that's a label cell)
-    updateCell('B2', bp);
-
-    // Write FROM/TO location info (row 8-9, column E)
-    const fromEl = el('entryTable').querySelector('input[data-row="8"]');
-    const toEl = el('entryTable').querySelector('input[data-row="9"]');
-    if (fromEl && fromEl.value) updateCell('E8', fromEl.value);
-    if (toEl && toEl.value) updateCell('E9', toEl.value);
+    // Write week ending to E5
+    updateCell('E5', fmtYYMMDD(sat));
+    
+    // Write business purpose to H5
+    updateCell('H5', bp);
+    
+    // Write dates to row 7 (DATE row - one for each day)
+    const dayLabels = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+    const sun = computeSundayFromWeekEnding(currentWeekEnding);
+    for (let i = 0; i < 7; i++) {
+      const dayDate = new Date(sun);
+      dayDate.setDate(dayDate.getDate() + i);
+      const dateStr = toISODate(dayDate); // ISO format YYYY-MM-DD
+      updateCell(`${dayCols[i]}7`, dateStr);
+    }
 
     // Write all expense values
     allInputs().forEach(inp => {
