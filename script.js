@@ -49,7 +49,7 @@ let weeksCache = []; // [{weekEnding,businessPurpose,updatedAt}]
 let loading = false;
 let currentData = null; // Holds the full entry data (including line items)
 let currentEditAddr = null; // Address being edited in modal
-const APP_VERSION = '54'; // Update this for each revision
+const APP_VERSION = '55'; // Update this for each revision
 
 // ============ LINE-ITEM MANAGEMENT ============
 
@@ -730,6 +730,18 @@ async function downloadExcel(){
     
     // Write business purpose to H5
     updateCell('H5', bp);
+    
+    // Write dates to row 7 (DATE row - one for each day)
+    for (let i = 0; i < 7; i++) {
+      const dayDate = new Date(sun);
+      dayDate.setDate(dayDate.getDate() + i);
+      // Format as m/d/yyyy
+      const month = (dayDate.getMonth() + 1);
+      const day = dayDate.getDate();
+      const year = dayDate.getFullYear();
+      const dateStr = `${month}/${day}/${year}`;
+      updateCell(`${dayCols[i]}7`, dateStr);
+    }
 
     // Write all expense values
     allInputs().forEach(inp => {
