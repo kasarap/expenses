@@ -68,7 +68,7 @@
       </div>
 
       <div class="hint">
-        Enter only the Sunday date — the Week Ending (Saturday) and the Excel date row are filled automatically.
+        Click the [+] button next to any expense amount to add multiple receipts for that day.
       </div>
     </section>
 
@@ -110,19 +110,24 @@
 </section>
   </main>
 
-  <dialog id="lineItemModal" class="line-item-modal">
+  <!-- Line Item Modal -->
+  <dialog id="lineItemModal" class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
-        <h2 id="modalTitle">Add Receipts</h2>
-        <button type="button" class="modal-close" onclick="closeLineItemModal()">✕</button>
+        <h3 id="modalTitle">Category - Day</h3>
+        <button id="modalCloseBtn" type="button" class="modal-close-btn">✕</button>
       </div>
-      <div id="modalItemsList" class="modal-items-list"></div>
+      
+      <div class="modal-body">
+        <div id="modalItemsList" class="modal-items-list"></div>
+      </div>
+      
       <div class="modal-footer">
-        <div class="modal-total-row">
-          <span>Total:</span>
-          <span id="modalTotal">$0.00</span>
+        <div class="modal-total-section">
+          <span class="modal-total-label">Total:</span>
+          <span id="modalTotal" class="modal-total-amount">$0.00</span>
         </div>
-        <button type="button" class="modal-done-btn" onclick="closeLineItemModal()">Done</button>
+        <button id="modalSaveBtn" type="button" class="modal-save-btn" onclick="closeLineItemModal()">Done</button>
       </div>
     </div>
   </dialog>
