@@ -115,7 +115,128 @@ function isItemized(addr){
          currentData.entries[`${addr}_items`].length > 0;
 }
 
-// ============ END LINE-ITEM MANAGEMENT ============
+// ============ LINE-ITEM MODAL ============
+
+function openLineItemModal(addr, categoryLabel, dayId){
+  currentEditAddr = addr;
+  
+  // Get the current input value (if any)
+  const inp = el('entryTable').querySelector(`input[data-col="${addr[0]}"][data-row="${addr.substring(1)}"]`);
+  const currentInputValue = inp ? Number(inp.value) || 0 : 0;
+  
+  let items = getLineItems(addr);
+  
+  // If no items yet but there's a value in the input, convert it to a line item
+  if (items.length === 0 && currentInputValue > 0 && !currentData?.entries?.[`${addr}_items`]) {
+    items = [{
+      id: generateItemId(),
+      amount: currentInputValue,
+      vendor: '',
+      note: ''
+    }];
+    setLineItems(addr, items);
+  }
+  
+  // Set up modal title
+  el('modalTitle').textContent = `${categoryLabel} - ${dayId}`;
+  
+  // Build items list
+  const itemsList = el('modalItemsList');
+  itemsList.innerHTML = '';
+  
+  items.forEach(item => {
+    const itemRow = document.createElement('div');
+    itemRow.className = 'modal-item-row';
+    itemRow.dataset.itemId = item.id;
+    
+    const amountInput = document.createElement('input');
+    amountInput.type = 'number';
+    amountInput.inputMode = 'decimal';
+    amountInput.placeholder = '0.00';
+    amountInput.value = item.amount || '';
+    amountInput.className = 'modal-amount-input';
+    amountInput.addEventListener('input', (e) => {
+      updateLineItem(addr, item.id, {amount: Number(e.target.value) || 0});
+      updateModalTotal();
+    });
+    
+    const vendorInput = document.createElement('input');
+    vendorInput.type = 'text';
+    vendorInput.placeholder = 'Vendor (optional)';
+    vendorInput.value = item.vendor || '';
+    vendorInput.className = 'modal-vendor-input';
+    vendorInput.addEventListener('input', (e) => {
+      updateLineItem(addr, item.id, {vendor: e.target.value});
+    });
+    
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'modal-delete-btn';
+    deleteBtn.textContent = '✕';
+    deleteBtn.addEventListener('click', () => {
+      deleteLineItem(addr, item.id);
+      itemRow.remove();
+      updateModalTotal();
+    });
+    
+    itemRow.appendChild(amountInput);
+    itemRow.appendChild(vendorInput);
+    itemRow.appendChild(deleteBtn);
+    itemsList.appendChild(itemRow);
+  });
+  
+  // Add new item button
+  const addRow = document.createElement('div');
+  addRow.className = 'modal-add-row';
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'modal-add-btn';
+  addBtn.textContent = '+ Add receipt';
+  addBtn.addEventListener('click', () => {
+    addLineItem(addr, 0, '', '');
+    openLineItemModal(addr, categoryLabel, dayId); // Refresh modal
+  });
+  addRow.appendChild(addBtn);
+  itemsList.appendChild(addRow);
+  
+  // Show modal
+  updateModalTotal();
+  el('lineItemModal').showModal();
+}
+
+function updateModalTotal(){
+  const items = getLineItems(currentEditAddr);
+  const total = items.reduce((sum, item)=> sum + (Number(item.amount) || 0), 0);
+  el('modalTotal').textContent = total > 0 ? `$${total.toFixed(2)}` : '$0.00';
+  // Live update main table
+  const inp = el('entryTable').querySelector(`input[data-col="${currentEditAddr[0]}"][data-row="${currentEditAddr.substring(1)}"]`);
+  if (inp) inp.value = total > 0 ? total.toFixed(2) : '';
+}
+
+function closeLineItemModal(){
+  currentEditAddr = null;
+  el('lineItemModal').close();
+  computeTotals();
+}
+
+function updateButtonColors(){
+  // Update + button colors based on whether cell has multiple items
+  const buttons = el('entryTable').querySelectorAll('.cell-add-btn');
+  buttons.forEach(btn => {
+    const addr = btn.dataset.addr;
+    const itemsKey = `${addr}_items`;
+    const actualItems = currentData?.entries?.[itemsKey];
+    
+    // Change button color if 2+ items
+    if (Array.isArray(actualItems) && actualItems.length > 1){
+      btn.classList.add('has-items');
+    } else {
+      btn.classList.remove('has-items');
+    }
+  });
+}
+
+// ============ END LINE-ITEM MODAL ============
 
 function setStatus(msg=''){ el('saveStatus').textContent = msg; }
 function renderSync(){
@@ -532,6 +653,9 @@ function computeTotals(){
     el(`tot${dayIds[idx]}`).value = t ? ('$' + t.toFixed(2)) : '';
   });
   el('totWEEK').value = week ? ('$' + week.toFixed(2)) : '';
+  
+  // Update button colors based on line items
+  updateButtonColors();
 }
 
 function serialize(){
