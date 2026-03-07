@@ -49,7 +49,7 @@ let weeksCache = []; // [{weekEnding,businessPurpose,updatedAt}]
 let loading = false;
 let currentData = null; // Holds the full entry data (including line items)
 let currentEditAddr = null; // Address being edited in modal
-const APP_VERSION = '48'; // Update this for each revision
+const APP_VERSION = '51'; // Update this for each revision
 
 // ============ LINE-ITEM MANAGEMENT ============
 
@@ -704,27 +704,41 @@ async function downloadExcel(){
     const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml');
     const xmlNS = sheetDoc.documentElement.namespaceURI;
 
+    // Force Excel to recalculate formulas
+    try {
+      const wbPath = 'xl/workbook.xml';
+      const wbXml = await zip.file(wbPath).async('string');
+      const wbDoc = new DOMParser().parseFromString(wbXml, 'application/xml');
+      const wbNS = wbDoc.documentElement.namespaceURI;
+      
+      let calcPr = wbDoc.getElementsByTagNameNS(wbNS, 'calcPr')[0] || wbDoc.getElementsByTagName('calcPr')[0];
+      if (!calcPr) {
+        calcPr = wbDoc.createElementNS(wbNS, 'calcPr');
+        wbDoc.documentElement.appendChild(calcPr);
+      }
+      calcPr.setAttribute('calcMode', 'auto');
+      calcPr.setAttribute('fullCalcOnLoad', '1');
+      
+      zip.file(wbPath, new XMLSerializer().serializeToString(wbDoc));
+    } catch (e) {
+      console.log('Could not set calc mode, but continuing...');
+    }
+
     const bp = (el('businessPurpose')?.value || '').trim();
     const sat = parseISODate(currentWeekEnding);
     const sun = computeSundayFromWeekEnding(currentWeekEnding);
 
-    // Function to update cell values while preserving formulas
+    // Function to update cell values simply
     function updateCell(cellRef, value) {
       const cell = sheetDoc.querySelector(`c[r="${cellRef}"]`);
       if (!cell) return;
       
-      // Just update the value, don't touch attributes or formulas
       let v = cell.querySelector('v');
       if (!v) {
         v = sheetDoc.createElementNS(xmlNS, 'v');
         cell.appendChild(v);
       }
-      
-      if (typeof value === 'number') {
-        v.textContent = String(value);
-      } else if (typeof value === 'string') {
-        v.textContent = String(value);
-      }
+      v.textContent = String(value);
     }
 
     // Write week ending to E5
@@ -738,7 +752,11 @@ async function downloadExcel(){
     for (let i = 0; i < 7; i++) {
       const dayDate = new Date(sun);
       dayDate.setDate(dayDate.getDate() + i);
-      const dateStr = toISODate(dayDate); // ISO format YYYY-MM-DD
+      // Format as m/d/yyyy
+      const month = (dayDate.getMonth() + 1);
+      const day = dayDate.getDate();
+      const year = dayDate.getFullYear();
+      const dateStr = `${month}/${day}/${year}`;
       updateCell(`${dayCols[i]}7`, dateStr);
     }
 
