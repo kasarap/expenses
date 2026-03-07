@@ -1,6 +1,5 @@
 
 // Weekly Expenses (Cloudflare Pages + KV)
-// v38-MODAL: Line-item modal for multiple receipts per category/day
 // Sync behaves like test-entry-log:
 // - Sync Name is a namespace (same sync across multiple weeks)
 // - On page load (if Sync exists) auto-load most recent week for that sync
@@ -47,190 +46,6 @@ let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
 let currentWeekEnding = ''; // YYYY-MM-DD
 let weeksCache = []; // [{weekEnding,businessPurpose,updatedAt}]
 let loading = false;
-let currentData = null; // Holds the full entry data (including line items)
-let currentEditAddr = null; // Address being edited in modal
-const APP_VERSION = '57'; // Update this for each revision
-
-// ============ LINE-ITEM MANAGEMENT ============
-
-// Generate a simple unique ID (timestamp-based)
-function generateItemId(){
-  return `item_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
-}
-
-// Get all line items for a cell (only actual itemized data)
-function getLineItems(addr){
-  const items = currentData?.entries?.[`${addr}_items`];
-  
-  // Only return if there are actual stored items
-  if (Array.isArray(items) && items.length > 0) {
-    return items;
-  }
-  
-  // For cells with single amounts (no items array), return empty
-  // This prevents showing artifacts from old single-value data
-  return [];
-}
-
-// Set line items for a cell
-function setLineItems(addr, items){
-  if (!currentData) return;
-  if (!currentData.entries) currentData.entries = {};
-  
-  const total = items.reduce((sum, item)=> sum + (Number(item.amount) || 0), 0);
-  currentData.entries[addr] = total > 0 ? total : 0;
-  currentData.entries[`${addr}_items`] = items;
-}
-
-// Add a new line item to a cell
-function addLineItem(addr, amount=0, vendor='', note=''){
-  const items = getLineItems(addr);
-  items.push({
-    id: generateItemId(),
-    amount: Number(amount) || 0,
-    vendor: vendor || '',
-    note: note || ''
-  });
-  setLineItems(addr, items);
-}
-
-// Update a line item
-function updateLineItem(addr, itemId, updates){
-  const items = getLineItems(addr);
-  const idx = items.findIndex(i=> i.id === itemId);
-  if (idx >= 0){
-    items[idx] = {...items[idx], ...updates};
-    setLineItems(addr, items);
-  }
-}
-
-// Delete a line item
-function deleteLineItem(addr, itemId){
-  const items = getLineItems(addr).filter(i=> i.id !== itemId);
-  setLineItems(addr, items);
-}
-
-// ============ MODAL MANAGEMENT ============
-
-function openLineItemModal(addr, categoryLabel, dayId){
-  currentEditAddr = addr;
-  
-  // Get the current input value (if any)
-  const inp = el('entryTable').querySelector(`input[data-col="${addr[0]}"][data-row="${addr.substring(1)}"]`);
-  const currentInputValue = inp ? Number(inp.value) || 0 : 0;
-  
-  let items = getLineItems(addr);
-  
-  // If no items yet but there's a value in the input, convert it to a line item
-  if (items.length === 0 && currentInputValue > 0 && !currentData?.entries?.[`${addr}_items`]) {
-    items = [{
-      id: generateItemId(),
-      amount: currentInputValue,
-      vendor: '',
-      note: ''
-    }];
-    setLineItems(addr, items);
-  }
-  
-  // Set up modal title
-  el('modalTitle').textContent = `${categoryLabel} - ${dayId}`;
-  
-  // Build items list
-  const itemsList = el('modalItemsList');
-  itemsList.innerHTML = '';
-  
-  items.forEach(item => {
-    const itemRow = document.createElement('div');
-    itemRow.className = 'modal-item-row';
-    itemRow.dataset.itemId = item.id;
-    
-    const amountInput = document.createElement('input');
-    amountInput.type = 'number';
-    amountInput.inputMode = 'decimal';
-    amountInput.placeholder = '0.00';
-    amountInput.value = item.amount || '';
-    amountInput.className = 'modal-amount-input';
-    amountInput.addEventListener('input', (e) => {
-      updateLineItem(addr, item.id, {amount: Number(e.target.value) || 0});
-      updateModalTotal();
-    });
-    
-    const vendorInput = document.createElement('input');
-    vendorInput.type = 'text';
-    vendorInput.placeholder = 'Vendor (optional)';
-    vendorInput.value = item.vendor || '';
-    vendorInput.className = 'modal-vendor-input';
-    vendorInput.addEventListener('input', (e) => {
-      updateLineItem(addr, item.id, {vendor: e.target.value});
-    });
-    
-    const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button';
-    deleteBtn.className = 'modal-delete-btn';
-    deleteBtn.textContent = '✕';
-    deleteBtn.addEventListener('click', () => {
-      deleteLineItem(addr, item.id);
-      itemRow.remove();
-      updateModalTotal();
-    });
-    
-    itemRow.appendChild(amountInput);
-    itemRow.appendChild(vendorInput);
-    itemRow.appendChild(deleteBtn);
-    itemsList.appendChild(itemRow);
-  });
-  
-  // Add new item button
-  const addRow = document.createElement('div');
-  addRow.className = 'modal-add-row';
-  const addBtn = document.createElement('button');
-  addBtn.type = 'button';
-  addBtn.className = 'modal-add-btn';
-  addBtn.textContent = '+ Add receipt';
-  addBtn.addEventListener('click', () => {
-    addLineItem(addr, 0, '', '');
-    openLineItemModal(addr, categoryLabel, dayId); // Refresh modal
-  });
-  addRow.appendChild(addBtn);
-  itemsList.appendChild(addRow);
-  
-  // Show modal
-  updateModalTotal();
-  el('lineItemModal').showModal();
-}
-
-function updateModalTotal(){
-  if (!currentEditAddr) return;
-  const items = getLineItems(currentEditAddr);
-  const total = items.reduce((sum, item)=> sum + (Number(item.amount) || 0), 0);
-  el('modalTotal').textContent = total > 0 ? `$${total.toFixed(2)}` : '$0.00';
-  
-  // Also update the main table input in real-time
-  const inp = el('entryTable').querySelector(`input[data-col="${currentEditAddr[0]}"][data-row="${currentEditAddr.substring(1)}"]`);
-  if (inp){
-    inp.value = total > 0 ? total.toFixed(2) : '';
-  }
-}
-
-function closeLineItemModal(){
-  // Update the main table input with the combined total
-  if (currentEditAddr && currentData?.entries){
-    const items = getLineItems(currentEditAddr);
-    const total = items.reduce((sum, item)=> sum + (Number(item.amount) || 0), 0);
-    
-    // Find and update the input for this cell
-    const inp = el('entryTable').querySelector(`input[data-col="${currentEditAddr[0]}"][data-row="${currentEditAddr.substring(1)}"]`);
-    if (inp){
-      inp.value = total > 0 ? total.toFixed(2) : '';
-    }
-  }
-  
-  el('lineItemModal').close();
-  currentEditAddr = null;
-  computeTotals();
-}
-
-// ============ END LINE-ITEM MANAGEMENT ============
 
 function setStatus(msg=''){ el('saveStatus').textContent = msg; }
 function renderSync(){
@@ -273,6 +88,7 @@ function fmtYYMMDD(d){
 }
 
 function setHeaderDatesFromSunday(sundayISO){
+  // sundayISO: YYYY-MM-DD
   const dateEls = {
     SUN: el('dateSUN'), MON: el('dateMON'), TUE: el('dateTUE'),
     WED: el('dateWED'), THU: el('dateTHU'), FRI: el('dateFRI'), SAT: el('dateSAT')
@@ -320,15 +136,9 @@ function buildTable(){
 
     for (let i=0;i<7;i++){
       const td=document.createElement('td');
-      const col = dayCols[i];
-      const dayId = dayIds[i];
-      
-      const cellWrapper = document.createElement('div');
-      cellWrapper.className = 'cell-wrapper';
-      
       const inp=document.createElement('input');
       inp.dataset.row=String(r.row);
-      inp.dataset.col=col;
+      inp.dataset.col=dayCols[i];
       inp.dataset.type=r.type;
       if (r.computed){
         inp.dataset.computed='true';
@@ -356,32 +166,10 @@ function buildTable(){
         const wrap=document.createElement('div');
         wrap.className='currency-wrap';
         wrap.appendChild(inp);
-        cellWrapper.appendChild(wrap);
-        
-        // Add line items display below the amount
-        const itemsDisplay = document.createElement('div');
-        itemsDisplay.className = 'cell-items-display';
-        itemsDisplay.dataset.addr = `${col}${r.row}`;
-        cellWrapper.appendChild(itemsDisplay);
-        
-        // Add (+) button for currency cells only
-        if (!r.computed){
-          const addBtn = document.createElement('button');
-          addBtn.type = 'button';
-          addBtn.className = 'cell-add-btn';
-          addBtn.textContent = '+';
-          addBtn.dataset.addr = `${col}${r.row}`;
-          addBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            openLineItemModal(`${col}${r.row}`, r.label, dayId);
-          });
-          cellWrapper.appendChild(addBtn);
-        }
+        td.appendChild(wrap);
       } else {
-        cellWrapper.appendChild(inp);
+        td.appendChild(inp);
       }
-      
-      td.appendChild(cellWrapper);
       tr.appendChild(td);
     }
     tbody.appendChild(tr);
@@ -412,9 +200,8 @@ function gridKeydown(e){
 function allInputs(){ return Array.from(el('entryTable').querySelectorAll('input')); }
 
 function clearEntryValues(){
-  allInputs().forEach(i=>{ if (i.dataset.computed!=='true') i.value=''; });
+  allInputs().forEach(i=>{ if (i.dataset.computed!=='true') i.value=''; else i.value=''; });
   el('businessPurpose').value='';
-  currentData = null;
   computeTotals();
 }
 
@@ -424,8 +211,10 @@ function clearAllNew(){
   setHeaderDatesFromSunday('');
   currentWeekEnding='';
   clearEntryValues();
+  // Reset sync so next save prompts (matches your "New (clear all)" expectation)
   currentSync='';
   renderSync();
+  setHeaderDatesFromSunday(el('sundayDate').value);
   weeksCache=[];
   renderWeeksDropdown();
   setButtonsEnabled();
@@ -442,52 +231,17 @@ function recomputeDerived(){
   }
 }
 
-function updateCellItemsDisplay(){
-  // Temporarily disabled - showing artifacts
-  // Line items are stored and exported, just not displayed in table for now
-  const displays = el('entryTable').querySelectorAll('.cell-items-display');
-  displays.forEach(display => { display.innerHTML = ''; });
-}
-
-function updateButtonColors(){
-  // Update + button colors based on whether cell has multiple items
-  const buttons = el('entryTable').querySelectorAll('.cell-add-btn');
-  buttons.forEach(btn => {
-    const addr = btn.dataset.addr;
-    const itemsKey = `${addr}_items`;
-    const actualItems = currentData?.entries?.[itemsKey];
-    
-    // Change button color if 2+ items
-    if (Array.isArray(actualItems) && actualItems.length > 1){
-      btn.classList.add('has-items');
-    } else {
-      btn.classList.remove('has-items');
-    }
-  });
-}
-
 function computeTotals(){
   recomputeDerived();
   const totals=[0,0,0,0,0,0,0];
-  
   allInputs().forEach(inp=>{
     if (inp.dataset.type!=='currency') return;
-    const addr = `${inp.dataset.col}${inp.dataset.row}`;
-    
-    const items = getLineItems(addr);
-    let cellTotal = 0;
-    if (items.length > 0){
-      cellTotal = items.reduce((sum, item)=> sum + (Number(item.amount) || 0), 0);
-    } else {
-      const v=(inp.value||'').trim();
-      if (!v) return;
-      const n=Number(v);
-      if (!Number.isFinite(n)) return;
-      cellTotal = n;
-    }
-    
+    const v=(inp.value||'').trim();
+    if (!v) return;
+    const n=Number(v);
+    if (!Number.isFinite(n)) return;
     const idx=dayCols.indexOf(inp.dataset.col);
-    if (idx>=0) totals[idx] += cellTotal;
+    if (idx>=0) totals[idx]+=n;
   });
   let week=0;
   totals.forEach((t,idx)=>{
@@ -495,9 +249,6 @@ function computeTotals(){
     el(`tot${dayIds[idx]}`).value = t ? ('$' + t.toFixed(2)) : '';
   });
   el('totWEEK').value = week ? ('$' + week.toFixed(2)) : '';
-  
-  // Update button colors to show which cells have multiple items
-  updateButtonColors();
 }
 
 function serialize(){
@@ -515,15 +266,6 @@ function serialize(){
       entries[addr]=raw;
     }
   });
-  
-  if (currentData?.entries){
-    Object.keys(currentData.entries).forEach(key=>{
-      if (key.endsWith('_items')){
-        entries[key] = currentData.entries[key];
-      }
-    });
-  }
-  
   return {
     syncName: currentSync,
     weekEnding: currentWeekEnding,
@@ -535,9 +277,6 @@ function serialize(){
 function applyData(data){
   clearEntryValues();
   if (!data) return;
-  
-  currentData = JSON.parse(JSON.stringify(data));
-  
   el('businessPurpose').value = data.businessPurpose || '';
   const map = data.entries || {};
   allInputs().forEach(inp=>{
@@ -545,13 +284,7 @@ function applyData(data){
     if (map[addr]==null) return;
     inp.value = String(map[addr]);
   });
-  
-  // Clear all line item displays initially
-  const displays = el('entryTable').querySelectorAll('.cell-items-display');
-  displays.forEach(display => { display.innerHTML = ''; });
-  
   computeTotals();
-  updateButtonColors();
 }
 
 async function apiFetchJson(url, opts={}){
@@ -639,6 +372,7 @@ async function saveWeek(){
   try{
     const body = JSON.stringify(serialize());
     await apiFetchJson(`${API.data}?sync=${encodeURIComponent(currentSync)}&weekEnding=${encodeURIComponent(currentWeekEnding)}`, {method:'PUT', body});
+    // Optimistic insert/update
     const existing = weeksCache.find(w=>w.weekEnding===currentWeekEnding);
     const bp = el('businessPurpose').value || '';
     const nowIso = new Date().toISOString();
@@ -703,33 +437,39 @@ async function downloadExcel(){
     const sheetXml = await zip.file(sheetPath).async('string');
     const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml');
 
-    // Only update value nodes in existing cells
-    function updateCellValue(cellRef, value) {
-      const cell = sheetDoc.querySelector(`c[r="${cellRef}"]`);
-      if (!cell) return;
-      
-      let v = cell.querySelector('v');
-      if (v) {
-        v.textContent = String(value);
-      }
-    }
-
     const bp = (el('businessPurpose')?.value || '').trim();
     const sat = parseISODate(currentWeekEnding);
     const sun = computeSundayFromWeekEnding(currentWeekEnding);
 
-    // Write values
+    // Function to update existing cell value
+    function updateCellValue(cellRef, value) {
+      const cell = sheetDoc.querySelector(`c[r="${cellRef}"]`);
+      if (!cell) return false;
+      
+      let v = cell.querySelector('v');
+      if (!v) return false;
+      
+      v.textContent = String(value);
+      return true;
+    }
+
+    // Write business purpose to H5
     updateCellValue('H5', bp);
-    updateCellValue('E5', fmtYYMMDD(sat));
+    
+    // Write week ending to E5
+    const month = (sat.getMonth() + 1);
+    const day = sat.getDate();
+    const year = sat.getFullYear();
+    updateCellValue('E5', `${month}/${day}/${year}`);
 
     // Write dates to row 7
     for (let i = 0; i < 7; i++) {
       const dayDate = new Date(sun);
       dayDate.setDate(dayDate.getDate() + i);
-      const month = (dayDate.getMonth() + 1);
-      const day = dayDate.getDate();
-      const year = dayDate.getFullYear();
-      updateCellValue(`${dayCols[i]}7`, `${month}/${day}/${year}`);
+      const m = (dayDate.getMonth() + 1);
+      const d = dayDate.getDate();
+      const y = dayDate.getFullYear();
+      updateCellValue(`${dayCols[i]}7`, `${m}/${d}/${y}`);
     }
 
     // Write all expense values
@@ -753,8 +493,8 @@ async function downloadExcel(){
     zip.file(sheetPath, new XMLSerializer().serializeToString(sheetDoc));
     const outBlob = await zip.generateAsync({type:'blob'});
 
+    // Filename
     let filename = `Week ${fmtMD(sun)} through ${fmtMD(sat)} - Angelton.xlsx`;
-    
     const weekSelectEl = el('weekSelect');
     if (weekSelectEl && weekSelectEl.value) {
       const selectedOption = weekSelectEl.querySelector(`option[value="${weekSelectEl.value}"]`);
@@ -775,7 +515,92 @@ async function downloadExcel(){
     setStatus('Excel downloaded.');
   } catch (e){
     console.error(e);
-    setStatus('Excel export failed: ' + e.message);
+    setStatus('Excel export failed.');
+  }
+}
+      const cell = ensureCell(ref);
+      cell.removeAttribute('t');
+
+      const styleAttr = cell.getAttribute('s');
+      const existingF = cell.getElementsByTagNameNS(xmlNS,'f')[0] || cell.getElementsByTagName('f')[0];
+
+      if (keepFormula && existingF){
+        const children = Array.from(cell.childNodes);
+        for (const ch of children){
+          if (ch.nodeType === 1 && (ch.localName === 'f' || ch.nodeName.endsWith(':f'))) continue;
+          cell.removeChild(ch);
+        }
+      } else {
+        while (cell.firstChild) cell.removeChild(cell.firstChild);
+      }
+
+      if (styleAttr) cell.setAttribute('s', styleAttr);
+
+      const oldV = cell.getElementsByTagNameNS(xmlNS,'v')[0] || cell.getElementsByTagName('v')[0];
+      if (oldV) oldV.parentNode.removeChild(oldV);
+
+      const v = sheetDoc.createElementNS(xmlNS,'v');
+      v.textContent = String(num);
+      cell.appendChild(v);
+    }
+    function setCellStringInline(ref, str){
+      const cell = ensureCell(ref);
+      cell.setAttribute('t','inlineStr');
+      while (cell.firstChild) cell.removeChild(cell.firstChild);
+      const is = sheetDoc.createElementNS(xmlNS,'is');
+      const t = sheetDoc.createElementNS(xmlNS,'t');
+      if (/^\s|\s$/.test(str)) t.setAttributeNS('http://www.w3.org/XML/1998/namespace','xml:space','preserve');
+      t.textContent = str;
+      is.appendChild(t);
+      cell.appendChild(is);
+    }
+    function fmtMDY(d){ return `${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`; }
+
+    setCellStringInline('E4', fmtMDY(sat));
+    setCellStringInline('E5', fmtMDY(sat));
+    setCellStringInline('H5', bp);
+
+    for (let i=0;i<7;i++){
+      const d = new Date(sun);
+      d.setDate(sun.getDate()+i);
+      setCellStringInline(`${dayCols[i]}7`, fmtMDY(d));
+    }
+
+    const payload = serialize();
+    for (const [addr,val] of Object.entries(payload.entries || {})){
+      if (typeof val === 'number') setCellNumber(addr, val);
+      else setCellStringInline(addr, String(val));
+    }
+
+    // Cached Personal Car Mileage values in row 29 based on miles (row 10).
+    let mileageWeekTotal = 0;
+    for (let i=0;i<7;i++){
+      const miles = Number(payload.entries?.[`${dayCols[i]}10`] ?? 0);
+      const amt = (Number.isFinite(miles) ? miles : 0) * MILEAGE_RATE;
+      if (amt > 0){
+        mileageWeekTotal += amt;
+        setCellNumber(`${dayCols[i]}29`, Number(amt.toFixed(2)), true);
+      }
+    }
+    if (mileageWeekTotal > 0){
+      setCellNumber(`J29`, Number(mileageWeekTotal.toFixed(2)), true);
+    }
+
+    zip.file(sheetPath, new XMLSerializer().serializeToString(sheetDoc));
+    const outBlob = await zip.generateAsync({type:'blob'});
+
+    const safeBp = (bp || 'Expenses').replace(/[\/:*?"<>|]+/g,'').trim() || 'Expenses';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(outBlob);
+    a.download = `Week ${fmtMD(sun)} through ${fmtMD(sat)} - ${safeBp}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+    setStatus('Excel downloaded.');
+  } catch (e){
+    console.error(e);
+    setStatus('Excel export failed.');
   }
 }
 
@@ -793,6 +618,7 @@ function onSundayChange(){
   const sat = computeWeekEndingFromSunday(v);
   const newWeekEnding = toISODate(sat);
   if (currentWeekEnding && newWeekEnding !== currentWeekEnding){
+    // New week: clear entries automatically, keep sync
     clearEntryValues();
     el('weekSelect').value = '';
     setStatus('New week selected. Entries cleared.');
@@ -831,11 +657,8 @@ async function init(){
   el('btnClear').addEventListener('click', clearAllNew);
   el('btnDownload').addEventListener('click', downloadExcel);
   el('btnChangeSync').addEventListener('click', changeSync);
-  
-  // Modal buttons
-  el('modalCloseBtn').addEventListener('click', closeLineItemModal);
-  el('lineItemModal').addEventListener('cancel', closeLineItemModal);
 
+  // If sync exists, load its most recent week automatically (A)
   if (currentSync){
     try{ await loadWeeksForSync(true); } catch {}
   }
