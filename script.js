@@ -49,7 +49,7 @@ let weeksCache = []; // [{weekEnding,businessPurpose,updatedAt}]
 let loading = false;
 let currentData = null; // Holds the full entry data (including line items)
 let currentEditAddr = null; // Address being edited in modal
-const APP_VERSION = '57'; // Update this for each revision
+const APP_VERSION = '58'; // Update this for each revision
 
 // ============ LINE-ITEM MANAGEMENT ============
 
@@ -703,83 +703,85 @@ async function downloadExcel(){
     const sheetXml = await zip.file(sheetPath).async('string');
     const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml');
 
-    // Only update value nodes in existing cells
+    // Only update value nodes in already-existing cells — never add new ones
     function updateCellValue(cellRef, value) {
       const cell = sheetDoc.querySelector(`c[r="${cellRef}"]`);
       if (!cell) return;
-      
-      let v = cell.querySelector('v');
-      if (v) {
-        v.textContent = String(value);
-      }
+      const v = cell.querySelector('v');
+      if (v) v.textContent = String(value);
     }
 
-    const bp = (el('businessPurpose')?.value || '').trim();
+    // ── Safe collapse: if _items exists use its sum; otherwise use stored value ──
+    function getCellExportValue(addr, type) {
+      const entries = currentData?.entries || {};
+      const itemsKey = `${addr}_items`;
+
+      if (type === 'currency') {
+        const items = entries[itemsKey];
+        if (Array.isArray(items) && items.length > 0) {
+          // Source of truth: collapse items to single total
+          const total = items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+          return total > 0 ? total : null;
+        }
+        // Fall back to stored scalar value (legacy format)
+        const stored = entries[addr];
+        if (stored != null && stored !== '') {
+          const n = Number(stored);
+          if (Number.isFinite(n) && n > 0) return n;
+        }
+        return null;
+      }
+
+      if (type === 'number') {
+        const stored = entries[addr];
+        if (stored != null && stored !== '') {
+          const n = Number(stored);
+          if (Number.isFinite(n) && n > 0) return n;
+        }
+        return null;
+      }
+
+      // text
+      return entries[addr] || null;
+    }
+
+    const bp  = (el('businessPurpose')?.value || '').trim();
     const sat = parseISODate(currentWeekEnding);
     const sun = computeSundayFromWeekEnding(currentWeekEnding);
 
-    // Write values
+    // Header cells
     updateCellValue('H5', bp);
     updateCellValue('E5', fmtYYMMDD(sat));
 
-    // Write dates to row 7
+    // Date row 7
     for (let i = 0; i < 7; i++) {
       const dayDate = new Date(sun);
       dayDate.setDate(dayDate.getDate() + i);
-      const month = (dayDate.getMonth() + 1);
-      const day = dayDate.getDate();
-      const year = dayDate.getFullYear();
-      updateCellValue(`${dayCols[i]}7`, `${month}/${day}/${year}`);
+      updateCellValue(`${dayCols[i]}7`, `${dayDate.getMonth()+1}/${dayDate.getDate()}/${dayDate.getFullYear()}`);
     }
 
-    // Get the payload with all data including _items
-    const payload = serialize();
-
-    // Write all expense values
-    Object.entries(payload.entries || {}).forEach(([addr, val]) => {
-      if (addr.endsWith('_items')) return; // Skip _items, they're handled per-cell
-      
-      let cellTotal = 0;
-      
-      // Check if this cell has _items
-      const items = payload.entries?.[`${addr}_items`];
-      if (Array.isArray(items) && items.length > 0) {
-        // Sum the items
-        cellTotal = items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-      } else {
-        // No items, use the value from entries
-        if (typeof val === 'number') {
-          cellTotal = val;
-        } else if (typeof val === 'string') {
-          const n = Number(val);
-          if (Number.isFinite(n) && n > 0) {
-            cellTotal = n;
-          } else if (val && val.length > 0) {
-            // Text value (FROM, TO, etc)
-            updateCellValue(addr, val);
-            return;
-          }
-        }
-      }
-      
-      // Write the total/value to Excel
-      if (cellTotal > 0) {
-        updateCellValue(addr, cellTotal);
-      }
+    // Expense rows — one collapsed value per cell, Excel handles all totals
+    rows.forEach(r => {
+      if (r.type === 'divider' || r.computed) return;
+      dayCols.forEach(col => {
+        const addr = `${col}${r.row}`;
+        const val  = getCellExportValue(addr, r.type);
+        if (val == null) return;
+        updateCellValue(addr, val);
+      });
     });
 
     zip.file(sheetPath, new XMLSerializer().serializeToString(sheetDoc));
     const outBlob = await zip.generateAsync({type:'blob'});
 
-    let filename = `Week ${fmtMD(sun)} through ${fmtMD(sat)} - Angelton.xlsx`;
-    
+    // Build filename from week-select label (strip leading date stamp if present)
+    let filename = `${safeFilenameBase(currentWeekEnding, el('businessPurpose')?.value)}.xlsx`;
     const weekSelectEl = el('weekSelect');
     if (weekSelectEl && weekSelectEl.value) {
-      const selectedOption = weekSelectEl.querySelector(`option[value="${weekSelectEl.value}"]`);
-      if (selectedOption) {
-        let optionText = selectedOption.textContent.trim();
-        optionText = optionText.replace(/^\d{2}\.\d{2}\.\d{2}\s*-\s*/, '').trim();
-        filename = optionText + '.xlsx';
+      const opt = weekSelectEl.querySelector(`option[value="${weekSelectEl.value}"]`);
+      if (opt) {
+        let label = opt.textContent.trim().replace(/^\d{2}\.\d{2}\.\d{2}\s*-\s*/, '').trim();
+        if (label) filename = label + '.xlsx';
       }
     }
 
@@ -789,7 +791,7 @@ async function downloadExcel(){
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     setStatus('Excel downloaded.');
   } catch (e){
     console.error(e);
