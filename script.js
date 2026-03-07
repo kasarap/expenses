@@ -1,5 +1,5 @@
 
-// Weekly Expenses (Cloudflare Pages + KV)
+// Weekly Expen ses (Cloudflare Pages + KV)
 // v38-MODAL: Line-item modal for multiple receipts per category/day
 // Sync behaves like test-entry-log:
 // - Sync Name is a namespace (same sync across multiple weeks)
