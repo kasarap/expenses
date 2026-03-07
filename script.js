@@ -732,28 +732,37 @@ async function downloadExcel(){
       updateCellValue(`${dayCols[i]}7`, `${month}/${day}/${year}`);
     }
 
+    // Get the payload with all data including _items
+    const payload = serialize();
+
     // Write all expense values
-    allInputs().forEach(inp => {
-      if (inp.dataset.computed === 'true') return;
+    Object.entries(payload.entries || {}).forEach(([addr, val]) => {
+      if (addr.endsWith('_items')) return; // Skip _items, they're handled per-cell
       
-      const addr = `${inp.dataset.col}${inp.dataset.row}`;
       let cellTotal = 0;
       
       // Check if this cell has _items
-      const items = currentData?.entries?.[`${addr}_items`];
+      const items = payload.entries?.[`${addr}_items`];
       if (Array.isArray(items) && items.length > 0) {
         // Sum the items
         cellTotal = items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
       } else {
-        // No items, use the input value
-        const val = inp.value ? inp.value.trim() : '';
-        if (!val) return;
-        const n = Number(val);
-        if (!Number.isFinite(n) || n <= 0) return;
-        cellTotal = n;
+        // No items, use the value from entries
+        if (typeof val === 'number') {
+          cellTotal = val;
+        } else if (typeof val === 'string') {
+          const n = Number(val);
+          if (Number.isFinite(n) && n > 0) {
+            cellTotal = n;
+          } else if (val && val.length > 0) {
+            // Text value (FROM, TO, etc)
+            updateCellValue(addr, val);
+            return;
+          }
+        }
       }
       
-      // Write the total to Excel
+      // Write the total/value to Excel
       if (cellTotal > 0) {
         updateCellValue(addr, cellTotal);
       }
