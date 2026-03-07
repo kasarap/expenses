@@ -266,7 +266,37 @@ function buildTable(){
         const wrap=document.createElement('div');
         wrap.className='currency-wrap';
         wrap.appendChild(inp);
-        td.appendChild(wrap);
+        
+        // Add line items display below the amount
+        const itemsDisplay = document.createElement('div');
+        itemsDisplay.className = 'cell-items-display';
+        itemsDisplay.dataset.addr = `${dayCols[i]}${r.row}`;
+        
+        // Create a container for amount + button
+        const cellWrapper = document.createElement('div');
+        cellWrapper.style.display = 'flex';
+        cellWrapper.style.gap = '4px';
+        cellWrapper.style.alignItems = 'flex-start';
+        
+        cellWrapper.appendChild(wrap);
+        
+        // Add (+) button for currency cells only
+        if (!r.computed){
+          const addBtn = document.createElement('button');
+          addBtn.type = 'button';
+          addBtn.className = 'cell-add-btn';
+          addBtn.textContent = '+';
+          addBtn.dataset.addr = `${dayCols[i]}${r.row}`;
+          addBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            const dayId = dayIds[i];
+            openLineItemModal(`${dayCols[i]}${r.row}`, r.label, dayId);
+          });
+          cellWrapper.appendChild(addBtn);
+        }
+        
+        td.appendChild(cellWrapper);
+        td.appendChild(itemsDisplay);
       } else {
         td.appendChild(inp);
       }
