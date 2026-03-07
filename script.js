@@ -1,6 +1,6 @@
 
 // Weekly Expenses (Cloudflare Pages + KV)
-// v38: Added line-item detail rows for multiple receipts per category/day
+// v38-MODAL: Line-item modal for multiple receipts per category/day
 // Sync behaves like test-entry-log:
 // - Sync Name is a namespace (same sync across multiple weeks)
 // - On page load (if Sync exists) auto-load most recent week for that sync
@@ -48,8 +48,8 @@ let currentWeekEnding = ''; // YYYY-MM-DD
 let weeksCache = []; // [{weekEnding,businessPurpose,updatedAt}]
 let loading = false;
 let currentData = null; // Holds the full entry data (including line items)
-let expandedRows = new Set(); // Track which rows are expanded (stores row numbers)
-const APP_VERSION = '53'; // Update this for each revision
+let currentEditAddr = null; // Address being edited in modal
+const APP_VERSION = '54'; // Update this for each revision
 
 // ============ LINE-ITEM MANAGEMENT ============
 
@@ -58,16 +58,17 @@ function generateItemId(){
   return `item_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
 }
 
-// Get all line items for a cell (fallback to single amount if not itemized)
+// Get all line items for a cell (only actual itemized data)
 function getLineItems(addr){
   const items = currentData?.entries?.[`${addr}_items`];
-  if (Array.isArray(items) && items.length > 0) return items;
   
-  // Fallback: single-item from old data
-  const val = currentData?.entries?.[addr];
-  if (val && typeof val === 'number' && val > 0){
-    return [{ id: generateItemId(), amount: val, vendor: '', note: '' }];
+  // Only return if there are actual stored items
+  if (Array.isArray(items) && items.length > 0) {
+    return items;
   }
+  
+  // For cells with single amounts (no items array), return empty
+  // This prevents showing artifacts from old single-value data
   return [];
 }
 
@@ -109,13 +110,7 @@ function deleteLineItem(addr, itemId){
   setLineItems(addr, items);
 }
 
-// Check if a cell has been itemized (has line items)
-function isItemized(addr){
-  return Array.isArray(currentData?.entries?.[`${addr}_items`]) &&
-         currentData.entries[`${addr}_items`].length > 0;
-}
-
-// ============ LINE-ITEM MODAL ============
+// ============ MODAL MANAGEMENT ============
 
 function openLineItemModal(addr, categoryLabel, dayId){
   currentEditAddr = addr;
@@ -205,38 +200,37 @@ function openLineItemModal(addr, categoryLabel, dayId){
 }
 
 function updateModalTotal(){
+  if (!currentEditAddr) return;
   const items = getLineItems(currentEditAddr);
   const total = items.reduce((sum, item)=> sum + (Number(item.amount) || 0), 0);
   el('modalTotal').textContent = total > 0 ? `$${total.toFixed(2)}` : '$0.00';
-  // Live update main table
+  
+  // Also update the main table input in real-time
   const inp = el('entryTable').querySelector(`input[data-col="${currentEditAddr[0]}"][data-row="${currentEditAddr.substring(1)}"]`);
-  if (inp) inp.value = total > 0 ? total.toFixed(2) : '';
+  if (inp){
+    inp.value = total > 0 ? total.toFixed(2) : '';
+  }
 }
 
 function closeLineItemModal(){
-  currentEditAddr = null;
+  // Update the main table input with the combined total
+  if (currentEditAddr && currentData?.entries){
+    const items = getLineItems(currentEditAddr);
+    const total = items.reduce((sum, item)=> sum + (Number(item.amount) || 0), 0);
+    
+    // Find and update the input for this cell
+    const inp = el('entryTable').querySelector(`input[data-col="${currentEditAddr[0]}"][data-row="${currentEditAddr.substring(1)}"]`);
+    if (inp){
+      inp.value = total > 0 ? total.toFixed(2) : '';
+    }
+  }
+  
   el('lineItemModal').close();
+  currentEditAddr = null;
   computeTotals();
 }
 
-function updateButtonColors(){
-  // Update + button colors based on whether cell has multiple items
-  const buttons = el('entryTable').querySelectorAll('.cell-add-btn');
-  buttons.forEach(btn => {
-    const addr = btn.dataset.addr;
-    const itemsKey = `${addr}_items`;
-    const actualItems = currentData?.entries?.[itemsKey];
-    
-    // Change button color if 2+ items
-    if (Array.isArray(actualItems) && actualItems.length > 1){
-      btn.classList.add('has-items');
-    } else {
-      btn.classList.remove('has-items');
-    }
-  });
-}
-
-// ============ END LINE-ITEM MODAL ============
+// ============ END LINE-ITEM MANAGEMENT ============
 
 function setStatus(msg=''){ el('saveStatus').textContent = msg; }
 function renderSync(){
@@ -279,7 +273,6 @@ function fmtYYMMDD(d){
 }
 
 function setHeaderDatesFromSunday(sundayISO){
-  // sundayISO: YYYY-MM-DD
   const dateEls = {
     SUN: el('dateSUN'), MON: el('dateMON'), TUE: el('dateTUE'),
     WED: el('dateWED'), THU: el('dateTHU'), FRI: el('dateFRI'), SAT: el('dateSAT')
@@ -322,44 +315,20 @@ function buildTable(){
     const tr=document.createElement('tr');
     const tdLabel=document.createElement('td');
     tdLabel.className='stickyLabel';
-
-    // Add expand button for currency categories (they can have multiple receipts)
-    const labelContainer = document.createElement('div');
-    labelContainer.className = 'label-container';
-    labelContainer.style.display = 'flex';
-    labelContainer.style.alignItems = 'center';
-    labelContainer.style.gap = '8px';
-
-    const labelText = document.createElement('span');
-    labelText.textContent = r.label;
-    labelContainer.appendChild(labelText);
-
-    // Add expand button only for currency rows (meals, travel, etc.)
-    if (r.type === 'currency' && !r.computed){
-      const expandBtn = document.createElement('button');
-      expandBtn.className = 'expand-btn';
-      expandBtn.type = 'button';
-      expandBtn.textContent = '▼';
-      expandBtn.style.padding = '4px 8px';
-      expandBtn.style.fontSize = '12px';
-      expandBtn.style.lineHeight = '1';
-      expandBtn.style.minWidth = 'auto';
-      expandBtn.dataset.row = String(r.row);
-      expandBtn.addEventListener('click', (e)=>{
-        e.preventDefault();
-        toggleRowExpansion(r.row);
-      });
-      labelContainer.appendChild(expandBtn);
-    }
-
-    tdLabel.appendChild(labelContainer);
+    tdLabel.textContent=r.label;
     tr.appendChild(tdLabel);
 
     for (let i=0;i<7;i++){
       const td=document.createElement('td');
+      const col = dayCols[i];
+      const dayId = dayIds[i];
+      
+      const cellWrapper = document.createElement('div');
+      cellWrapper.className = 'cell-wrapper';
+      
       const inp=document.createElement('input');
       inp.dataset.row=String(r.row);
-      inp.dataset.col=dayCols[i];
+      inp.dataset.col=col;
       inp.dataset.type=r.type;
       if (r.computed){
         inp.dataset.computed='true';
@@ -387,19 +356,13 @@ function buildTable(){
         const wrap=document.createElement('div');
         wrap.className='currency-wrap';
         wrap.appendChild(inp);
+        cellWrapper.appendChild(wrap);
         
         // Add line items display below the amount
         const itemsDisplay = document.createElement('div');
         itemsDisplay.className = 'cell-items-display';
-        itemsDisplay.dataset.addr = `${dayCols[i]}${r.row}`;
-        
-        // Create a container for amount + button
-        const cellWrapper = document.createElement('div');
-        cellWrapper.style.display = 'flex';
-        cellWrapper.style.gap = '4px';
-        cellWrapper.style.alignItems = 'flex-start';
-        
-        cellWrapper.appendChild(wrap);
+        itemsDisplay.dataset.addr = `${col}${r.row}`;
+        cellWrapper.appendChild(itemsDisplay);
         
         // Add (+) button for currency cells only
         if (!r.computed){
@@ -407,165 +370,22 @@ function buildTable(){
           addBtn.type = 'button';
           addBtn.className = 'cell-add-btn';
           addBtn.textContent = '+';
-          addBtn.dataset.addr = `${dayCols[i]}${r.row}`;
+          addBtn.dataset.addr = `${col}${r.row}`;
           addBtn.addEventListener('click', (e) => {
             e.preventDefault();
-            const dayId = dayIds[i];
-            openLineItemModal(`${dayCols[i]}${r.row}`, r.label, dayId);
+            openLineItemModal(`${col}${r.row}`, r.label, dayId);
           });
           cellWrapper.appendChild(addBtn);
         }
-        
-        td.appendChild(cellWrapper);
-        td.appendChild(itemsDisplay);
       } else {
-        td.appendChild(inp);
+        cellWrapper.appendChild(inp);
       }
+      
+      td.appendChild(cellWrapper);
       tr.appendChild(td);
     }
     tbody.appendChild(tr);
   });
-}
-
-function toggleRowExpansion(rowNum){
-  const rowKey = String(rowNum);
-  if (expandedRows.has(rowKey)){
-    expandedRows.delete(rowKey);
-  } else {
-    expandedRows.add(rowKey);
-  }
-  rebuildDetailRows();
-}
-
-function rebuildDetailRows(){
-  const tbody = el('entryTable').querySelector('tbody');
-  const detailRows = tbody.querySelectorAll('tr[data-detail-row="true"]');
-  detailRows.forEach(row=> row.remove());
-  
-  rows.forEach(r=>{
-    if (!expandedRows.has(String(r.row))) return;
-    if (r.type !== 'currency' || r.computed) return;
-    
-    const mainRow = tbody.querySelector(`tr input[data-row="${r.row}"][data-col="C"]`)?.closest('tr');
-    if (!mainRow) return;
-    
-    const detailRow = createDetailRow(r.row);
-    mainRow.insertAdjacentElement('afterend', detailRow);
-  });
-}
-
-function createDetailRow(rowNum){
-  const tr = document.createElement('tr');
-  tr.setAttribute('data-detail-row', 'true');
-  tr.setAttribute('data-for-row', String(rowNum));
-  tr.className = 'detail-row-container';
-  
-  const tdLabel = document.createElement('td');
-  tdLabel.className = 'stickyLabel detail-label';
-  tdLabel.textContent = '';
-  tr.appendChild(tdLabel);
-  
-  const tdContent = document.createElement('td');
-  tdContent.colSpan = 7;
-  tdContent.className = 'detail-content';
-  
-  const detailsContainer = document.createElement('div');
-  detailsContainer.className = 'line-items-container';
-  
-  dayCols.forEach((col, dayIdx)=>{
-    const addr = `${col}${rowNum}`;
-    const dayId = dayIds[dayIdx];
-    
-    const dayContainer = document.createElement('div');
-    dayContainer.className = 'day-line-items';
-    dayContainer.dataset.addr = addr;
-    dayContainer.dataset.dayId = dayId;
-    
-    const dayHeader = document.createElement('div');
-    dayHeader.className = 'day-header';
-    dayHeader.textContent = dayId;
-    dayContainer.appendChild(dayHeader);
-    
-    const itemsList = document.createElement('div');
-    itemsList.className = 'items-list';
-    itemsList.dataset.addr = addr;
-    
-    const items = getLineItems(addr);
-    items.forEach(item=>{
-      const itemEl = createLineItemElement(addr, item);
-      itemsList.appendChild(itemEl);
-    });
-    
-    dayContainer.appendChild(itemsList);
-    
-    const addBtn = document.createElement('button');
-    addBtn.type = 'button';
-    addBtn.className = 'add-item-btn';
-    addBtn.textContent = '+ Add';
-    addBtn.style.fontSize = '12px';
-    addBtn.style.padding = '4px 8px';
-    addBtn.addEventListener('click', ()=>{
-      addLineItem(addr, 0, '', '');
-      rebuildDetailRows();
-      computeTotals();
-    });
-    dayContainer.appendChild(addBtn);
-    
-    detailsContainer.appendChild(dayContainer);
-  });
-  
-  tdContent.appendChild(detailsContainer);
-  tr.appendChild(tdContent);
-  
-  return tr;
-}
-
-function createLineItemElement(addr, item){
-  const itemEl = document.createElement('div');
-  itemEl.className = 'line-item';
-  itemEl.dataset.itemId = item.id;
-  
-  const amountInput = document.createElement('input');
-  amountInput.type = 'number';
-  amountInput.inputMode = 'decimal';
-  amountInput.placeholder = '0.00';
-  amountInput.value = item.amount || '';
-  amountInput.className = 'line-item-amount';
-  amountInput.style.width = '80px';
-  amountInput.addEventListener('input', (e)=>{
-    const newAmount = Number(e.target.value) || 0;
-    updateLineItem(addr, item.id, {amount: newAmount});
-    computeTotals();
-  });
-  
-  const vendorInput = document.createElement('input');
-  vendorInput.type = 'text';
-  vendorInput.placeholder = 'Vendor (optional)';
-  vendorInput.value = item.vendor || '';
-  vendorInput.className = 'line-item-vendor';
-  vendorInput.style.flex = '1';
-  vendorInput.style.minWidth = '120px';
-  vendorInput.addEventListener('input', (e)=>{
-    updateLineItem(addr, item.id, {vendor: e.target.value});
-  });
-  
-  const deleteBtn = document.createElement('button');
-  deleteBtn.type = 'button';
-  deleteBtn.className = 'delete-item-btn';
-  deleteBtn.textContent = '✕';
-  deleteBtn.style.padding = '4px 8px';
-  deleteBtn.style.color = 'var(--danger)';
-  deleteBtn.addEventListener('click', ()=>{
-    deleteLineItem(addr, item.id);
-    rebuildDetailRows();
-    computeTotals();
-  });
-  
-  itemEl.appendChild(amountInput);
-  itemEl.appendChild(vendorInput);
-  itemEl.appendChild(deleteBtn);
-  
-  return itemEl;
 }
 
 function gridKeydown(e){
@@ -608,8 +428,6 @@ function clearAllNew(){
   renderSync();
   weeksCache=[];
   renderWeeksDropdown();
-  expandedRows.clear();
-  rebuildDetailRows();
   setButtonsEnabled();
   setStatus('Cleared. Set Sunday date and Sync Name on Save.');
 }
@@ -622,6 +440,30 @@ function recomputeDerived(){
     const n = Number((milesInp.value || '').trim());
     outInp.value = (Number.isFinite(n) && n>0) ? (n * MILEAGE_RATE).toFixed(2) : '';
   }
+}
+
+function updateCellItemsDisplay(){
+  // Temporarily disabled - showing artifacts
+  // Line items are stored and exported, just not displayed in table for now
+  const displays = el('entryTable').querySelectorAll('.cell-items-display');
+  displays.forEach(display => { display.innerHTML = ''; });
+}
+
+function updateButtonColors(){
+  // Update + button colors based on whether cell has multiple items
+  const buttons = el('entryTable').querySelectorAll('.cell-add-btn');
+  buttons.forEach(btn => {
+    const addr = btn.dataset.addr;
+    const itemsKey = `${addr}_items`;
+    const actualItems = currentData?.entries?.[itemsKey];
+    
+    // Change button color if 2+ items
+    if (Array.isArray(actualItems) && actualItems.length > 1){
+      btn.classList.add('has-items');
+    } else {
+      btn.classList.remove('has-items');
+    }
+  });
 }
 
 function computeTotals(){
@@ -654,7 +496,7 @@ function computeTotals(){
   });
   el('totWEEK').value = week ? ('$' + week.toFixed(2)) : '';
   
-  // Update button colors based on line items
+  // Update button colors to show which cells have multiple items
   updateButtonColors();
 }
 
@@ -704,9 +546,12 @@ function applyData(data){
     inp.value = String(map[addr]);
   });
   
-  expandedRows.clear();
+  // Clear all line item displays initially
+  const displays = el('entryTable').querySelectorAll('.cell-items-display');
+  displays.forEach(display => { display.innerHTML = ''; });
   
   computeTotals();
+  updateButtonColors();
 }
 
 async function apiFetchJson(url, opts={}){
@@ -863,7 +708,7 @@ async function downloadExcel(){
     const sat = parseISODate(currentWeekEnding);
     const sun = computeSundayFromWeekEnding(currentWeekEnding);
 
-    // Simple function to update cell values
+    // Function to update cell values simply
     function updateCell(cellRef, value) {
       const cell = sheetDoc.querySelector(`c[r="${cellRef}"]`);
       if (!cell) return;
@@ -876,41 +721,38 @@ async function downloadExcel(){
       v.textContent = String(value);
     }
 
+    // Write week ending to E5 in m/d/yyyy format
+    const month = (sat.getMonth() + 1);
+    const day = sat.getDate();
+    const year = sat.getFullYear();
+    const weekEndingStr = `${month}/${day}/${year}`;
+    updateCell('E5', weekEndingStr);
+    
     // Write business purpose to H5
     updateCell('H5', bp);
-    
-    // Write week ending to E5
-    updateCell('E5', fmtYYMMDD(sat));
-    
-    // Write dates to row 7 (one for each day, formatted as m/d/yyyy)
-    for (let i = 0; i < 7; i++) {
-      const dayDate = new Date(sun);
-      dayDate.setDate(dayDate.getDate() + i);
-      const month = (dayDate.getMonth() + 1);
-      const day = dayDate.getDate();
-      const year = dayDate.getFullYear();
-      const dateStr = `${month}/${day}/${year}`;
-      updateCell(`${dayCols[i]}7`, dateStr);
-    }
 
-    // Write all expense values from inputs
+    // Write all expense values
     allInputs().forEach(inp => {
       if (inp.dataset.computed === 'true') return;
       const val = inp.value ? inp.value.trim() : '';
       if (!val) return;
 
       const addr = `${inp.dataset.col}${inp.dataset.row}`;
-      const n = Number(val);
-      
-      if (Number.isFinite(n)) {
-        updateCell(addr, n);
+
+      if (inp.dataset.type === 'number' || inp.dataset.type === 'currency') {
+        const n = Number(val);
+        if (Number.isFinite(n) && n > 0) {
+          updateCell(addr, n);
+        }
+      } else {
+        updateCell(addr, val);
       }
     });
 
     zip.file(sheetPath, new XMLSerializer().serializeToString(sheetDoc));
     const outBlob = await zip.generateAsync({type:'blob'});
 
-    // Filename from saved entry
+    // Filename: just the saved entry label without date prefix
     let filename = `Week ${fmtMD(sun)} through ${fmtMD(sat)} - Angelton.xlsx`;
     
     const weekSelectEl = el('weekSelect');
@@ -918,7 +760,9 @@ async function downloadExcel(){
       const selectedOption = weekSelectEl.querySelector(`option[value="${weekSelectEl.value}"]`);
       if (selectedOption) {
         let optionText = selectedOption.textContent.trim();
+        // Remove date prefix like "26.03.07 - "
         optionText = optionText.replace(/^\d{2}\.\d{2}\.\d{2}\s*-\s*/, '').trim();
+        // Result: "Week 3-1 through 3-7 - Angelton"
         filename = optionText + '.xlsx';
       }
     }
@@ -979,7 +823,6 @@ async function changeSync(){
 
 async function init(){
   buildTable();
-  rebuildDetailRows();
   computeTotals();
   renderSync();
 
@@ -990,6 +833,10 @@ async function init(){
   el('btnClear').addEventListener('click', clearAllNew);
   el('btnDownload').addEventListener('click', downloadExcel);
   el('btnChangeSync').addEventListener('click', changeSync);
+  
+  // Modal buttons
+  el('modalCloseBtn').addEventListener('click', closeLineItemModal);
+  el('lineItemModal').addEventListener('cancel', closeLineItemModal);
 
   if (currentSync){
     try{ await loadWeeksForSync(true); } catch {}
