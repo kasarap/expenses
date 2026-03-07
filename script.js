@@ -49,7 +49,7 @@ let weeksCache = []; // [{weekEnding,businessPurpose,updatedAt}]
 let loading = false;
 let currentData = null; // Holds the full entry data (including line items)
 let currentEditAddr = null; // Address being edited in modal
-const APP_VERSION = '59'; // Update this for each revision
+const APP_VERSION = '58'; // Update this for each revision
 
 // ============ LINE-ITEM MANAGEMENT ============
 
@@ -703,16 +703,114 @@ async function downloadExcel(){
     const sheetXml = await zip.file(sheetPath).async('string');
     const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml');
 
-    // getElementsByTagName avoids XML namespace issues that break querySelector
-    function updateCellValue(cellRef, value) {
-      const cells = sheetDoc.getElementsByTagName('c');
-      let cell = null;
-      for (let i = 0; i < cells.length; i++) {
-        if (cells[i].getAttribute('r') === cellRef) { cell = cells[i]; break; }
+    const sharedStringsPath = 'xl/sharedStrings.xml';
+    let sharedStringsDoc = null;
+    let sharedStringsRoot = null;
+    let sharedStringMap = new Map();
+    let sharedStringDirty = false;
+
+    if (zip.file(sharedStringsPath)) {
+      const sharedStringsXml = await zip.file(sharedStringsPath).async('string');
+      sharedStringsDoc = new DOMParser().parseFromString(sharedStringsXml, 'application/xml');
+      sharedStringsRoot = sharedStringsDoc.querySelector('sst');
+      if (sharedStringsRoot) {
+        const sis = Array.from(sharedStringsRoot.querySelectorAll('si'));
+        sis.forEach((si, idx) => {
+          const key = si.textContent || '';
+          if (!sharedStringMap.has(key)) sharedStringMap.set(key, idx);
+        });
       }
+    }
+
+    function getCellNode(cellRef) {
+      return sheetDoc.querySelector(`c[r="${cellRef}"]`);
+    }
+
+    function ensureChild(parent, tagName) {
+      let child = Array.from(parent.childNodes).find(n => n.nodeType === 1 && n.nodeName === tagName);
+      if (!child) {
+        child = sheetDoc.createElement(tagName);
+        parent.appendChild(child);
+      }
+      return child;
+    }
+
+    function clearCellContent(cell) {
+      Array.from(cell.children).forEach(child => {
+        if (['v', 'is', 'f'].includes(child.nodeName)) child.remove();
+      });
+    }
+
+    function getOrCreateSharedStringIndex(text) {
+      if (!sharedStringsRoot) return null;
+      const key = String(text ?? '');
+      if (sharedStringMap.has(key)) return sharedStringMap.get(key);
+
+      const si = sharedStringsDoc.createElement('si');
+      const t = sharedStringsDoc.createElement('t');
+      t.textContent = key;
+      si.appendChild(t);
+      sharedStringsRoot.appendChild(si);
+
+      const idx = sharedStringMap.size;
+      sharedStringMap.set(key, idx);
+      const count = Number(sharedStringsRoot.getAttribute('count') || 0) + 1;
+      const uniqueCount = Number(sharedStringsRoot.getAttribute('uniqueCount') || idx) + 1;
+      sharedStringsRoot.setAttribute('count', String(count));
+      sharedStringsRoot.setAttribute('uniqueCount', String(uniqueCount));
+      sharedStringDirty = true;
+      return idx;
+    }
+
+    function setCellString(cell, value) {
+      const text = String(value ?? '');
+      clearCellContent(cell);
+
+      const currentType = cell.getAttribute('t');
+      if (currentType === 'inlineStr') {
+        const isNode = ensureChild(cell, 'is');
+        isNode.innerHTML = '';
+        const tNode = sheetDoc.createElement('t');
+        tNode.textContent = text;
+        isNode.appendChild(tNode);
+        return;
+      }
+
+      if (sharedStringsRoot) {
+        const idx = getOrCreateSharedStringIndex(text);
+        cell.setAttribute('t', 's');
+        const vNode = ensureChild(cell, 'v');
+        vNode.textContent = String(idx);
+        return;
+      }
+
+      cell.setAttribute('t', 'inlineStr');
+      const isNode = ensureChild(cell, 'is');
+      const tNode = sheetDoc.createElement('t');
+      tNode.textContent = text;
+      isNode.appendChild(tNode);
+    }
+
+    function setCellNumber(cell, value) {
+      clearCellContent(cell);
+      cell.removeAttribute('t');
+      const vNode = ensureChild(cell, 'v');
+      vNode.textContent = String(value);
+    }
+
+    // Only update already-existing cells — never change layout/UI/template structure
+    function updateCellValue(cellRef, value) {
+      const cell = getCellNode(cellRef);
       if (!cell) return;
-      const vs = cell.getElementsByTagName('v');
-      if (vs.length > 0) vs[0].textContent = String(value);
+      if (value == null || value === '') {
+        clearCellContent(cell);
+        return;
+      }
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        setCellNumber(cell, value);
+      } else {
+        setCellString(cell, value);
+      }
     }
 
     const bp  = (el('businessPurpose')?.value || '').trim();
@@ -760,6 +858,23 @@ async function downloadExcel(){
     });
 
     zip.file(sheetPath, new XMLSerializer().serializeToString(sheetDoc));
+    if (sharedStringsDoc && sharedStringDirty) {
+      zip.file(sharedStringsPath, new XMLSerializer().serializeToString(sharedStringsDoc));
+    }
+    const workbookCalcPath = 'xl/workbook.xml';
+    if (zip.file(workbookCalcPath)) {
+      const workbookXml = await zip.file(workbookCalcPath).async('string');
+      const workbookDoc = new DOMParser().parseFromString(workbookXml, 'application/xml');
+      let calcPr = workbookDoc.querySelector('calcPr');
+      if (!calcPr) {
+        calcPr = workbookDoc.createElement('calcPr');
+        workbookDoc.documentElement.appendChild(calcPr);
+      }
+      calcPr.setAttribute('calcMode', 'auto');
+      calcPr.setAttribute('fullCalcOnLoad', '1');
+      calcPr.setAttribute('forceFullCalc', '1');
+      zip.file(workbookCalcPath, new XMLSerializer().serializeToString(workbookDoc));
+    }
     const outBlob = await zip.generateAsync({type:'blob'});
 
     // Build filename from week-select label (strip leading date stamp if present)
