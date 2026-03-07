@@ -14,6 +14,8 @@ const dayIds  = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
 
 const MILEAGE_RATE = 0.7; // $/mile (display + export cached values)
 
+let currentEditAddr = null; // Current cell being edited in modal
+
 const rows = [
   {row:8,  label:'FROM',                   type:'text'},
   {row:9,  label:'TO',                     type:'text'},
@@ -262,10 +264,28 @@ function buildTable(){
       inp.addEventListener('keydown', gridKeydown);
 
       if (r.type==='currency'){
-        const wrap=document.createElement('div');
-        wrap.className='currency-wrap';
+        const cellWrapper = document.createElement('div');
+        cellWrapper.style.display = 'flex';
+        cellWrapper.style.gap = '4px';
+        cellWrapper.style.alignItems = 'center';
+        
+        const wrap = document.createElement('div');
+        wrap.className = 'currency-wrap';
         wrap.appendChild(inp);
-        td.appendChild(wrap);
+        cellWrapper.appendChild(wrap);
+        
+        // Add (+) button
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'cell-add-btn';
+        addBtn.textContent = '+';
+        addBtn.dataset.addr = `${col}${r.row}`;
+        addBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          openLineItemModal(`${col}${r.row}`, r.label, dayId);
+        });
+        cellWrapper.appendChild(addBtn);
+        td.appendChild(cellWrapper);
       } else {
         td.appendChild(inp);
       }
@@ -681,6 +701,156 @@ async function deleteWeek(){
   } finally {
     setButtonsEnabled();
   }
+}
+
+function getLineItems(addr){
+  const items = currentData?.entries?.[`${addr}_items`];
+  if (Array.isArray(items) && items.length > 0) {
+    return items;
+  }
+  return [];
+}
+
+function setLineItems(addr, items){
+  if (!currentData) currentData = {};
+  if (!currentData.entries) currentData.entries = {};
+  currentData.entries[`${addr}_items`] = items;
+}
+
+function generateItemId(){
+  return 'item_' + Math.random().toString(36).substr(2, 9);
+}
+
+function addLineItem(addr, amount, vendor, note){
+  const items = getLineItems(addr);
+  items.push({id: generateItemId(), amount, vendor, note});
+  setLineItems(addr, items);
+  computeTotals();
+}
+
+function updateLineItem(addr, itemId, updates){
+  const items = getLineItems(addr);
+  const item = items.find(i => i.id === itemId);
+  if (item) Object.assign(item, updates);
+  setLineItems(addr, items);
+  computeTotals();
+}
+
+function deleteLineItem(addr, itemId){
+  let items = getLineItems(addr);
+  items = items.filter(i => i.id !== itemId);
+  setLineItems(addr, items);
+  computeTotals();
+}
+
+function openLineItemModal(addr, categoryLabel, dayId){
+  currentEditAddr = addr;
+  
+  const inp = el('entryTable').querySelector(`input[data-col="${addr[0]}"][data-row="${addr.substring(1)}"]`);
+  const currentInputValue = inp ? Number(inp.value) || 0 : 0;
+  
+  let items = getLineItems(addr);
+  
+  if (items.length === 0 && currentInputValue > 0 && !currentData?.entries?.[`${addr}_items`]) {
+    items = [{
+      id: generateItemId(),
+      amount: currentInputValue,
+      vendor: '',
+      note: ''
+    }];
+    setLineItems(addr, items);
+  }
+  
+  el('modalTitle').textContent = `${categoryLabel} - ${dayId}`;
+  
+  const itemsList = el('modalItemsList');
+  itemsList.innerHTML = '';
+  
+  items.forEach(item => {
+    const itemRow = document.createElement('div');
+    itemRow.className = 'modal-item-row';
+    itemRow.dataset.itemId = item.id;
+    
+    const amountInput = document.createElement('input');
+    amountInput.type = 'number';
+    amountInput.inputMode = 'decimal';
+    amountInput.placeholder = '0.00';
+    amountInput.value = item.amount || '';
+    amountInput.className = 'modal-amount-input';
+    amountInput.addEventListener('input', (e) => {
+      updateLineItem(addr, item.id, {amount: Number(e.target.value) || 0});
+      updateModalTotal();
+    });
+    
+    const vendorInput = document.createElement('input');
+    vendorInput.type = 'text';
+    vendorInput.placeholder = 'Vendor (optional)';
+    vendorInput.value = item.vendor || '';
+    vendorInput.className = 'modal-vendor-input';
+    vendorInput.addEventListener('input', (e) => {
+      updateLineItem(addr, item.id, {vendor: e.target.value});
+    });
+    
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'modal-delete-btn';
+    deleteBtn.textContent = '✕';
+    deleteBtn.addEventListener('click', () => {
+      deleteLineItem(addr, item.id);
+      itemRow.remove();
+      updateModalTotal();
+    });
+    
+    itemRow.appendChild(amountInput);
+    itemRow.appendChild(vendorInput);
+    itemRow.appendChild(deleteBtn);
+    itemsList.appendChild(itemRow);
+  });
+  
+  const addRow = document.createElement('div');
+  addRow.className = 'modal-add-row';
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'modal-add-btn';
+  addBtn.textContent = '+ Add receipt';
+  addBtn.addEventListener('click', () => {
+    addLineItem(addr, 0, '', '');
+    openLineItemModal(addr, categoryLabel, dayId);
+  });
+  addRow.appendChild(addBtn);
+  itemsList.appendChild(addRow);
+  
+  updateModalTotal();
+  el('lineItemModal').showModal();
+}
+
+function updateModalTotal(){
+  const items = getLineItems(currentEditAddr);
+  const total = items.reduce((sum, item)=> sum + (Number(item.amount) || 0), 0);
+  el('modalTotal').textContent = total > 0 ? `$${total.toFixed(2)}` : '$0.00';
+  
+  const inp = el('entryTable').querySelector(`input[data-col="${currentEditAddr[0]}"][data-row="${currentEditAddr.substring(1)}"]`);
+  if (inp) inp.value = total > 0 ? total.toFixed(2) : '';
+}
+
+function closeLineItemModal(){
+  el('lineItemModal').close();
+  computeTotals();
+}
+
+function updateButtonColors(){
+  const buttons = el('entryTable').querySelectorAll('.cell-add-btn');
+  buttons.forEach(btn => {
+    const addr = btn.dataset.addr;
+    const itemsKey = `${addr}_items`;
+    const actualItems = currentData?.entries?.[itemsKey];
+    
+    if (Array.isArray(actualItems) && actualItems.length > 1){
+      btn.classList.add('has-items');
+    } else {
+      btn.classList.remove('has-items');
+    }
+  });
 }
 
 async function downloadExcel(){

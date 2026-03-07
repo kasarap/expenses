@@ -110,6 +110,23 @@
 </section>
   </main>
 
+  <dialog id="lineItemModal" class="line-item-modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="modalTitle">Add Receipts</h2>
+        <button type="button" class="modal-close" onclick="closeLineItemModal()">✕</button>
+      </div>
+      <div id="modalItemsList" class="modal-items-list"></div>
+      <div class="modal-footer">
+        <div class="modal-total-row">
+          <span>Total:</span>
+          <span id="modalTotal">$0.00</span>
+        </div>
+        <button type="button" class="modal-done-btn" onclick="closeLineItemModal()">Done</button>
+      </div>
+    </div>
+  </dialog>
+
   <script src="vendor/jszip.min.js"></script>
   <script src="script.js"></script>
 </body>

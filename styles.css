@@ -251,3 +251,159 @@ input.computed{opacity:.85}
     width: 100% !important;
   }
 }
+
+/* Modal styles */
+.line-item-modal {
+  border: none;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  padding: 0;
+  max-width: 500px;
+  width: 90%;
+}
+
+.line-item-modal::backdrop {
+  background: rgba(0,0,0,0.5);
+}
+
+.modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 18px;
+  color: #333;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #999;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+}
+
+.modal-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.modal-item-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.modal-amount-input,
+.modal-vendor-input {
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.modal-amount-input {
+  width: 100px;
+}
+
+.modal-vendor-input {
+  flex: 1;
+  min-width: 150px;
+}
+
+.modal-delete-btn {
+  background: #f44336;
+  color: white;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.modal-add-row {
+  padding-top: 8px;
+  border-top: 1px solid #eee;
+}
+
+.modal-add-btn {
+  background: #2196F3;
+  color: white;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  width: 100%;
+}
+
+.modal-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #eee;
+}
+
+.modal-total-row {
+  display: flex;
+  justify-content: space-between;
+  font-weight: bold;
+  font-size: 16px;
+}
+
+.modal-done-btn {
+  background: #4CAF50;
+  color: white;
+  border: none;
+  padding: 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+/* Button styles */
+.cell-add-btn {
+  background: rgba(33, 150, 243, 0.2);
+  border: 1px solid #2196F3;
+  color: #2196F3;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: all 0.2s;
+}
+
+.cell-add-btn:hover {
+  background: rgba(33, 150, 243, 0.3);
+}
+
+.cell-add-btn.has-items {
+  background: rgba(76, 175, 80, 0.2) !important;
+  border: 1px solid #4CAF50 !important;
+  color: #4CAF50 !important;
+}
