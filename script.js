@@ -49,7 +49,7 @@ let weeksCache = []; // [{weekEnding,businessPurpose,updatedAt}]
 let loading = false;
 let currentData = null; // Holds the full entry data (including line items)
 let currentEditAddr = null; // Address being edited in modal
-const APP_VERSION = '59'; // Update this for each revision
+const APP_VERSION = '58'; // Update this for each revision
 
 // ============ LINE-ITEM MANAGEMENT ============
 
@@ -690,93 +690,268 @@ async function downloadExcel(){
   setStatus('Building Excel…');
   try{
     if (typeof JSZip === 'undefined') throw new Error('JSZip library not loaded');
-    const candidates = ['/Expenses%20Form.xlsx','Expenses%20Form.xlsx','/Expenses Form.xlsx','Expenses Form.xlsx'];
-    let res=null;
-    for (const url of candidates){
-      try{ res = await fetch(url, {cache:'no-store'}); if (res && res.ok) break; } catch {}
-    }
-    if (!res || !res.ok) throw new Error('Template not found');
-    const ab = await res.arrayBuffer();
-    const zip = await JSZip.loadAsync(ab);
-    console.log('[export] template loaded, files:', Object.keys(zip.files));
-
-    const sheetPath = 'xl/worksheets/sheet1.xml';
-    const sheetXml = await zip.file(sheetPath).async('string');
-    console.log('[export] sheet XML length:', sheetXml.length);
-    console.log('[export] sheet XML preview:', sheetXml.substring(0, 500));
-    const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml');
-
-    const allCells = sheetDoc.getElementsByTagName('c');
-    console.log('[export] cells found via getElementsByTagName:', allCells.length);
-    if (allCells.length > 0) {
-      console.log('[export] first cell r attr:', allCells[0].getAttribute('r'));
-    }
-
-    // getElementsByTagName avoids XML namespace issues that break querySelector
-    function updateCellValue(cellRef, value) {
-      const cells = sheetDoc.getElementsByTagName('c');
-      let cell = null;
-      for (let i = 0; i < cells.length; i++) {
-        if (cells[i].getAttribute('r') === cellRef) { cell = cells[i]; break; }
-      }
-      if (!cell) { console.log('[export] cell NOT found:', cellRef); return; }
-      const vs = cell.getElementsByTagName('v');
-      if (vs.length > 0) {
-        console.log('[export] writing', cellRef, '=', value);
-        vs[0].textContent = String(value);
-      } else {
-        console.log('[export] cell has no <v> tag:', cellRef, cell.outerHTML);
-      }
-    }
 
     const bp  = (el('businessPurpose')?.value || '').trim();
     const sat = parseISODate(currentWeekEnding);
     const sun = computeSundayFromWeekEnding(currentWeekEnding);
 
-    // Header cells
-    updateCellValue('H5', bp);
-    updateCellValue('E5', fmtYYMMDD(sat));
+    const exportCells = new Map();
+    exportCells.set('H5', bp);
+    exportCells.set('E5', fmtYYMMDD(sat));
 
-    // Date row 7
     for (let i = 0; i < 7; i++) {
       const dayDate = new Date(sun);
       dayDate.setDate(dayDate.getDate() + i);
-      updateCellValue(`${dayCols[i]}7`, `${dayDate.getMonth()+1}/${dayDate.getDate()}/${dayDate.getFullYear()}`);
+      exportCells.set(`${dayCols[i]}7`, `${dayDate.getMonth()+1}/${dayDate.getDate()}/${dayDate.getFullYear()}`);
     }
 
-    // Write one value per cell — Excel handles all totals, never write individual receipts
+    recomputeDerived();
+
     allInputs().forEach(inp => {
-      if (inp.dataset.computed === 'true') return;
       const addr = `${inp.dataset.col}${inp.dataset.row}`;
 
       if (inp.dataset.type === 'currency') {
-        // If _items exists, collapse to sum (source of truth); else use input value
         const items = currentData?.entries?.[`${addr}_items`];
-        let exportVal;
+        let exportVal = 0;
         if (Array.isArray(items) && items.length > 0) {
           exportVal = items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
         } else {
           const v = (inp.value || '').trim();
           exportVal = v ? Number(v) : 0;
         }
-        if (Number.isFinite(exportVal) && exportVal > 0) {
-          updateCellValue(addr, exportVal);
-        }
-      } else if (inp.dataset.type === 'number') {
+        if (Number.isFinite(exportVal) && exportVal !== 0) exportCells.set(addr, exportVal);
+        return;
+      }
+
+      if (inp.dataset.type === 'number') {
         const v = (inp.value || '').trim();
         if (!v) return;
         const n = Number(v);
-        if (Number.isFinite(n) && n > 0) updateCellValue(addr, n);
-      } else {
-        const v = (inp.value || '').trim();
-        if (v) updateCellValue(addr, v);
+        if (Number.isFinite(n)) exportCells.set(addr, n);
+        return;
       }
+
+      if (inp.dataset.computed === 'true') {
+        const v = (inp.value || '').trim();
+        if (!v) return;
+        const n = Number(v);
+        if (Number.isFinite(n)) exportCells.set(addr, n);
+        return;
+      }
+
+      const v = (inp.value || '').trim();
+      if (v) exportCells.set(addr, v);
     });
 
-    zip.file(sheetPath, new XMLSerializer().serializeToString(sheetDoc));
-    const outBlob = await zip.generateAsync({type:'blob'});
+    function columnNumberToLetters(num) {
+      let s = '';
+      while (num > 0) {
+        const mod = (num - 1) % 26;
+        s = String.fromCharCode(65 + mod) + s;
+        num = Math.floor((num - mod) / 26);
+      }
+      return s;
+    }
 
-    // Build filename from week-select label (strip leading date stamp if present)
+    function columnLettersToNumber(str) {
+      let num = 0;
+      for (let i = 0; i < str.length; i++) num = num * 26 + (str.charCodeAt(i) - 64);
+      return num;
+    }
+
+    function parseCellRef(ref){
+      const m = /^([A-Z]+)(\d+)$/.exec(ref);
+      if (!m) throw new Error(`Invalid cell reference: ${ref}`);
+      return { rowNumber: Number(m[2]), colNumber: columnLettersToNumber(m[1]) };
+    }
+
+    function escapeXml(s){
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+    }
+
+    function makeMinimalWorkbookXml(sheetName='Sheet1'){
+      return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <fileVersion appName="xl"/>
+  <workbookPr/>
+  <bookViews><workbookView xWindow="0" yWindow="0" windowWidth="24000" windowHeight="12000"/></bookViews>
+  <sheets><sheet name="${sheetName}" sheetId="1" r:id="rId1"/></sheets>
+  <calcPr calcId="171027" fullCalcOnLoad="1" forceFullCalc="1"/>
+</workbook>`;
+    }
+
+    function makeMinimalStylesXml(){
+      return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>
+  <fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
+  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="4" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs>
+  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+    }
+
+    function makeScratchSheetXml(cellsMap){
+      const rowMap = new Map();
+      for (const [ref, value] of cellsMap.entries()){
+        const {rowNumber, colNumber} = parseCellRef(ref);
+        if (!rowMap.has(rowNumber)) rowMap.set(rowNumber, []);
+        const isNumber = typeof value === 'number' && Number.isFinite(value);
+        const cellXml = isNumber
+          ? `<c r="${ref}" s="1"><v>${value}</v></c>`
+          : `<c r="${ref}" t="inlineStr"><is><t>${escapeXml(String(value))}</t></is></c>`;
+        rowMap.get(rowNumber).push({colNumber, xml: cellXml});
+      }
+      const rowNumbers = [...rowMap.keys()].sort((a,b)=>a-b);
+      const rowsXml = rowNumbers.map(rowNumber => `<row r="${rowNumber}">${rowMap.get(rowNumber).sort((a,b)=>a.colNumber-b.colNumber).map(c=>c.xml).join('')}</row>`).join('');
+      const maxCol = [...cellsMap.keys()].reduce((m, ref) => Math.max(m, parseCellRef(ref).colNumber), 1);
+      const maxRow = rowNumbers.length ? rowNumbers[rowNumbers.length - 1] : 1;
+      const dim = `A1:${columnNumberToLetters(maxCol)}${maxRow}`;
+      return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="${dim}"/>
+  <sheetViews><sheetView workbookViewId="0"/></sheetViews>
+  <sheetFormatPr defaultRowHeight="15"/>
+  <sheetData>${rowsXml}</sheetData>
+  <pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>
+</worksheet>`;
+    }
+
+    function makeMinimalWorkbookZip(cellsMap){
+      const outZip = new JSZip();
+      outZip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+</Types>`);
+      outZip.folder('_rels').file('.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
+</Relationships>`);
+      outZip.folder('docProps').file('app.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>ChatGPT</Application></Properties>`);
+      const nowIso = new Date().toISOString();
+      outZip.folder('docProps').file('core.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:creator>ChatGPT</dc:creator><cp:lastModifiedBy>ChatGPT</cp:lastModifiedBy><dcterms:created xsi:type="dcterms:W3CDTF">${nowIso}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${nowIso}</dcterms:modified></cp:coreProperties>`);
+      const xl = outZip.folder('xl');
+      xl.file('workbook.xml', makeMinimalWorkbookXml('Expenses'));
+      xl.folder('_rels').file('workbook.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`);
+      xl.file('styles.xml', makeMinimalStylesXml());
+      xl.folder('worksheets').file('sheet1.xml', makeScratchSheetXml(cellsMap));
+      return outZip;
+    }
+
+    async function fetchTemplateFile(){
+      const candidates = ['/Expenses%20Form.xlsx','Expenses%20Form.xlsx','/Expenses Form.xlsx','Expenses Form.xlsx','/expenses-form.xlsx','expenses-form.xlsx','/template.xlsx','template.xlsx'];
+      for (const url of candidates){
+        try {
+          const res = await fetch(url, {cache:'no-store'});
+          if (res && res.ok) return res;
+        } catch {}
+      }
+      return null;
+    }
+
+    function ensureRow(sheetDoc, rowNumber){
+      let row = sheetDoc.querySelector(`row[r="${rowNumber}"]`);
+      if (row) return row;
+      const sheetData = sheetDoc.querySelector('sheetData');
+      if (!sheetData) throw new Error('sheetData not found in template');
+      row = sheetDoc.createElementNS(sheetDoc.documentElement.namespaceURI, 'row');
+      row.setAttribute('r', String(rowNumber));
+      const rows = Array.from(sheetData.querySelectorAll('row'));
+      const next = rows.find(r => Number(r.getAttribute('r')) > rowNumber);
+      if (next) sheetData.insertBefore(row, next); else sheetData.appendChild(row);
+      return row;
+    }
+
+    function ensureCell(sheetDoc, cellRef){
+      let cell = sheetDoc.querySelector(`c[r="${cellRef}"]`);
+      if (cell) return cell;
+      const { rowNumber, colNumber } = parseCellRef(cellRef);
+      const row = ensureRow(sheetDoc, rowNumber);
+      cell = sheetDoc.createElementNS(sheetDoc.documentElement.namespaceURI, 'c');
+      cell.setAttribute('r', cellRef);
+      const existingCells = Array.from(row.querySelectorAll('c'));
+      const next = existingCells.find(c => parseCellRef(c.getAttribute('r')).colNumber > colNumber);
+      if (next) row.insertBefore(cell, next); else row.appendChild(cell);
+      return cell;
+    }
+
+    function setCellValueInTemplate(sheetDoc, cellRef, value){
+      const cell = ensureCell(sheetDoc, cellRef);
+      Array.from(cell.children).forEach(child => {
+        const name = child.localName || child.nodeName;
+        if (name === 'v' || name === 'is' || name === 'f') child.remove();
+      });
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        cell.removeAttribute('t');
+        const v = sheetDoc.createElementNS(sheetDoc.documentElement.namespaceURI, 'v');
+        v.textContent = String(value);
+        cell.appendChild(v);
+      } else {
+        cell.setAttribute('t', 'inlineStr');
+        const is = sheetDoc.createElementNS(sheetDoc.documentElement.namespaceURI, 'is');
+        const t = sheetDoc.createElementNS(sheetDoc.documentElement.namespaceURI, 't');
+        t.textContent = String(value);
+        is.appendChild(t);
+        cell.appendChild(is);
+      }
+    }
+
+    function forceWorkbookRecalc(workbookDoc){
+      let calcPr = workbookDoc.querySelector('calcPr');
+      if (!calcPr){
+        calcPr = workbookDoc.createElementNS(workbookDoc.documentElement.namespaceURI, 'calcPr');
+        workbookDoc.documentElement.appendChild(calcPr);
+      }
+      calcPr.setAttribute('calcId', '171027');
+      calcPr.setAttribute('fullCalcOnLoad', '1');
+      calcPr.setAttribute('forceFullCalc', '1');
+    }
+
+    const templateRes = await fetchTemplateFile();
+    let outBlob;
+
+    if (templateRes){
+      const ab = await templateRes.arrayBuffer();
+      const zip = await JSZip.loadAsync(ab);
+      const sheetPath = 'xl/worksheets/sheet1.xml';
+      const workbookPath = 'xl/workbook.xml';
+      if (!zip.file(sheetPath)) throw new Error('Template workbook is missing xl/worksheets/sheet1.xml');
+
+      const sheetXml = await zip.file(sheetPath).async('string');
+      const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml');
+      for (const [addr, value] of exportCells.entries()) setCellValueInTemplate(sheetDoc, addr, value);
+      zip.file(sheetPath, new XMLSerializer().serializeToString(sheetDoc));
+
+      if (zip.file(workbookPath)) {
+        const workbookXml = await zip.file(workbookPath).async('string');
+        const workbookDoc = new DOMParser().parseFromString(workbookXml, 'application/xml');
+        forceWorkbookRecalc(workbookDoc);
+        zip.file(workbookPath, new XMLSerializer().serializeToString(workbookDoc));
+      }
+
+      outBlob = await zip.generateAsync({type:'blob'});
+    } else {
+      const scratchZip = makeMinimalWorkbookZip(exportCells);
+      outBlob = await scratchZip.generateAsync({type:'blob'});
+    }
+
     let filename = `${safeFilenameBase(currentWeekEnding, el('businessPurpose')?.value)}.xlsx`;
     const weekSelectEl = el('weekSelect');
     if (weekSelectEl && weekSelectEl.value) {
@@ -794,7 +969,7 @@ async function downloadExcel(){
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    setStatus('Excel downloaded.');
+    setStatus(templateRes ? 'Excel downloaded.' : 'Excel downloaded (template not found, exported plain workbook).');
   } catch (e){
     console.error(e);
     setStatus('Excel export failed: ' + e.message);
