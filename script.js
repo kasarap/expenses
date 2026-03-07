@@ -49,7 +49,7 @@ let weeksCache = []; // [{weekEnding,businessPurpose,updatedAt}]
 let loading = false;
 let currentData = null; // Holds the full entry data (including line items)
 let currentEditAddr = null; // Address being edited in modal
-const APP_VERSION = '43'; // Update this for each revision
+const APP_VERSION = '44'; // Update this for each revision
 
 // ============ LINE-ITEM MANAGEMENT ============
 
@@ -739,9 +739,8 @@ async function downloadExcel(){
       }
     }
 
-    // Write business purpose and date
+    // Write business purpose only (not date to B7 - that's a label cell)
     updateCell('B2', bp);
-    updateCell('B7', fmtYYMMDD(sat));
 
     // Write FROM/TO location info (row 8-9, column E)
     const fromEl = el('entryTable').querySelector('input[data-row="8"]');
@@ -766,41 +765,6 @@ async function downloadExcel(){
         updateCell(addr, val);
       }
     });
-
-    // Write all total cells (computed fields)
-    // Day totals
-    dayIds.forEach((dayId, idx) => {
-      const totInput = el(`tot${dayId}`);
-      if (totInput && totInput.value) {
-        const val = Number(totInput.value.replace('$',''));
-        if (val > 0) {
-          updateCell(`${dayCols[idx]}17`, val); // TOTAL COMPANY PAID
-          updateCell(`${dayCols[idx]}24`, val); // TOTAL TRAVEL
-          updateCell(`${dayCols[idx]}30`, val); // TOTAL AUTO
-          updateCell(`${dayCols[idx]}35`, val); // TOTAL TELEPHONE
-          updateCell(`${dayCols[idx]}41`, val); // TOTAL EXPENSES
-          updateCell(`${dayCols[idx]}45`, val); // TOTAL MEALS
-          updateCell(`${dayCols[idx]}50`, val); // TOTAL ENTERTAINMENT
-          updateCell(`${dayCols[idx]}51`, val); // TOTAL EXPENSES PAYABLE
-        }
-      }
-    });
-
-    // Week total
-    const weekTotalInput = el('totWEEK');
-    if (weekTotalInput && weekTotalInput.value) {
-      const val = Number(weekTotalInput.value.replace('$',''));
-      if (val > 0) {
-        updateCell('J17', val);
-        updateCell('J24', val);
-        updateCell('J30', val);
-        updateCell('J35', val);
-        updateCell('J41', val);
-        updateCell('J45', val);
-        updateCell('J50', val);
-        updateCell('J51', val);
-      }
-    }
 
     zip.file(sheetPath, new XMLSerializer().serializeToString(sheetDoc));
     const outBlob = await zip.generateAsync({type:'blob'});
