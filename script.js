@@ -698,10 +698,19 @@ async function downloadExcel(){
     if (!res || !res.ok) throw new Error('Template not found');
     const ab = await res.arrayBuffer();
     const zip = await JSZip.loadAsync(ab);
+    console.log('[export] template loaded, files:', Object.keys(zip.files));
 
     const sheetPath = 'xl/worksheets/sheet1.xml';
     const sheetXml = await zip.file(sheetPath).async('string');
+    console.log('[export] sheet XML length:', sheetXml.length);
+    console.log('[export] sheet XML preview:', sheetXml.substring(0, 500));
     const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml');
+
+    const allCells = sheetDoc.getElementsByTagName('c');
+    console.log('[export] cells found via getElementsByTagName:', allCells.length);
+    if (allCells.length > 0) {
+      console.log('[export] first cell r attr:', allCells[0].getAttribute('r'));
+    }
 
     // getElementsByTagName avoids XML namespace issues that break querySelector
     function updateCellValue(cellRef, value) {
@@ -710,9 +719,14 @@ async function downloadExcel(){
       for (let i = 0; i < cells.length; i++) {
         if (cells[i].getAttribute('r') === cellRef) { cell = cells[i]; break; }
       }
-      if (!cell) return;
+      if (!cell) { console.log('[export] cell NOT found:', cellRef); return; }
       const vs = cell.getElementsByTagName('v');
-      if (vs.length > 0) vs[0].textContent = String(value);
+      if (vs.length > 0) {
+        console.log('[export] writing', cellRef, '=', value);
+        vs[0].textContent = String(value);
+      } else {
+        console.log('[export] cell has no <v> tag:', cellRef, cell.outerHTML);
+      }
     }
 
     const bp  = (el('businessPurpose')?.value || '').trim();
