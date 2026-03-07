@@ -49,7 +49,7 @@ let weeksCache = []; // [{weekEnding,businessPurpose,updatedAt}]
 let loading = false;
 let currentData = null; // Holds the full entry data (including line items)
 let currentEditAddr = null; // Address being edited in modal
-const APP_VERSION = '51'; // Update this for each revision
+const APP_VERSION = '53'; // Update this for each revision
 
 // ============ LINE-ITEM MANAGEMENT ============
 
@@ -704,26 +704,6 @@ async function downloadExcel(){
     const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml');
     const xmlNS = sheetDoc.documentElement.namespaceURI;
 
-    // Force Excel to recalculate formulas
-    try {
-      const wbPath = 'xl/workbook.xml';
-      const wbXml = await zip.file(wbPath).async('string');
-      const wbDoc = new DOMParser().parseFromString(wbXml, 'application/xml');
-      const wbNS = wbDoc.documentElement.namespaceURI;
-      
-      let calcPr = wbDoc.getElementsByTagNameNS(wbNS, 'calcPr')[0] || wbDoc.getElementsByTagName('calcPr')[0];
-      if (!calcPr) {
-        calcPr = wbDoc.createElementNS(wbNS, 'calcPr');
-        wbDoc.documentElement.appendChild(calcPr);
-      }
-      calcPr.setAttribute('calcMode', 'auto');
-      calcPr.setAttribute('fullCalcOnLoad', '1');
-      
-      zip.file(wbPath, new XMLSerializer().serializeToString(wbDoc));
-    } catch (e) {
-      console.log('Could not set calc mode, but continuing...');
-    }
-
     const bp = (el('businessPurpose')?.value || '').trim();
     const sat = parseISODate(currentWeekEnding);
     const sun = computeSundayFromWeekEnding(currentWeekEnding);
@@ -748,16 +728,14 @@ async function downloadExcel(){
     updateCell('H5', bp);
     
     // Write dates to row 7 (DATE row - one for each day)
-    const dayLabels = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+    // Excel stores dates as numbers (days since 1900-01-01)
     for (let i = 0; i < 7; i++) {
       const dayDate = new Date(sun);
       dayDate.setDate(dayDate.getDate() + i);
-      // Format as m/d/yyyy
-      const month = (dayDate.getMonth() + 1);
-      const day = dayDate.getDate();
-      const year = dayDate.getFullYear();
-      const dateStr = `${month}/${day}/${year}`;
-      updateCell(`${dayCols[i]}7`, dateStr);
+      
+      // Convert to Excel date number
+      const excelDate = Math.floor((dayDate - new Date(1900, 0, 1)) / 86400000) + 2;
+      updateCell(`${dayCols[i]}7`, excelDate);
     }
 
     // Write all expense values
