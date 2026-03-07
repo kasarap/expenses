@@ -49,7 +49,7 @@ let weeksCache = []; // [{weekEnding,businessPurpose,updatedAt}]
 let loading = false;
 let currentData = null; // Holds the full entry data (including line items)
 let currentEditAddr = null; // Address being edited in modal
-const APP_VERSION = '58'; // Update this for each revision
+const APP_VERSION = '59'; // Update this for each revision
 
 // ============ LINE-ITEM MANAGEMENT ============
 
@@ -700,159 +700,82 @@ async function downloadExcel(){
     const zip = await JSZip.loadAsync(ab);
 
     const sheetPath = 'xl/worksheets/sheet1.xml';
-    const workbookPath = 'xl/workbook.xml';
-    const sheetXml = await zip.file(sheetPath).async('string');
-    const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml');
-    const sheetData = sheetDoc.getElementsByTagName('sheetData')[0];
+    let xml = await zip.file(sheetPath).async('string');
 
-    const workbookXml = await zip.file(workbookPath).async('string');
-    const workbookDoc = new DOMParser().parseFromString(workbookXml, 'application/xml');
+    // Write a numeric value into a cell (expense amounts, miles, date serials)
+    // Template cells are self-closing: <c r="D43" s="24"/>
+    // We inject <v> by converting to full open/close tag
+    function writeNumber(cellRef, value) {
+      const p = new RegExp('<c r="' + cellRef + '"([^/]*?)\\s*/>');
+      xml = xml.replace(p, (m, attrs) => '<c r="' + cellRef + '"' + attrs + '><v>' + value + '</v></c>');
+    }
 
-    function excelSerialFromDate(dateObj) {
-      const utc = Date.UTC(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
-      return utc / 86400000 + 25569;
-    }
-    function cellParts(cellRef){
-      const m = /^([A-Z]+)(\d+)$/.exec(cellRef);
-      if (!m) throw new Error(`Invalid cell reference: ${cellRef}`);
-      return { col: m[1], row: Number(m[2]) };
-    }
-    function colNumber(col){
-      let n = 0;
-      for (let i = 0; i < col.length; i++) n = (n * 26) + (col.charCodeAt(i) - 64);
-      return n;
-    }
-    function ensureRow(rowNum){
-      let row = sheetDoc.querySelector(`row[r="${rowNum}"]`);
-      if (row) return row;
-      row = sheetDoc.createElementNS(sheetDoc.documentElement.namespaceURI, 'row');
-      row.setAttribute('r', String(rowNum));
-
-      const rows = Array.from(sheetData.getElementsByTagName('row'));
-      const next = rows.find(r => Number(r.getAttribute('r')) > rowNum);
-      if (next) sheetData.insertBefore(row, next);
-      else sheetData.appendChild(row);
-      return row;
-    }
-    function ensureCell(cellRef){
-      let cell = sheetDoc.querySelector(`c[r="${cellRef}"]`);
-      if (cell) return cell;
-
-      const { col, row } = cellParts(cellRef);
-      const rowEl = ensureRow(row);
-      cell = sheetDoc.createElementNS(sheetDoc.documentElement.namespaceURI, 'c');
-      cell.setAttribute('r', cellRef);
-
-      const cells = Array.from(rowEl.getElementsByTagName('c'));
-      const thisColNum = colNumber(col);
-      const next = cells.find(c => colNumber(cellParts(c.getAttribute('r')).col) > thisColNum);
-      if (next) rowEl.insertBefore(cell, next);
-      else rowEl.appendChild(cell);
-      return cell;
-    }
-    function clearCellChildren(cell){
-      Array.from(cell.children).forEach(child => {
-        const tag = child.localName || child.nodeName;
-        if (tag === 'v' || tag === 'is' || tag === 'f') cell.removeChild(child);
+    // Write a text value into a cell using inlineStr format
+    // Avoids needing to touch sharedStrings.xml
+    function writeText(cellRef, value) {
+      const escaped = String(value).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const p = new RegExp('<c r="' + cellRef + '"([^/]*?)\\s*/>');
+      xml = xml.replace(p, (m, attrs) => {
+        // Remove any existing t="..." attribute so we can set t="inlineStr"
+        const cleanAttrs = attrs.replace(/\s*t="[^"]*"/, '');
+        return '<c r="' + cellRef + '"' + cleanAttrs + ' t="inlineStr"><is><t>' + escaped + '</t></is></c>';
       });
     }
-    function setCellNumber(cellRef, value){
-      const cell = ensureCell(cellRef);
-      clearCellChildren(cell);
-      cell.removeAttribute('t');
-      const v = sheetDoc.createElementNS(sheetDoc.documentElement.namespaceURI, 'v');
-      v.textContent = String(value);
-      cell.appendChild(v);
-    }
-    function setCellText(cellRef, value){
-      const cell = ensureCell(cellRef);
-      clearCellChildren(cell);
-      cell.setAttribute('t', 'inlineStr');
-      const is = sheetDoc.createElementNS(sheetDoc.documentElement.namespaceURI, 'is');
-      const t = sheetDoc.createElementNS(sheetDoc.documentElement.namespaceURI, 't');
-      if (/^\s|\s$/.test(value)) {
-        t.setAttribute('xml:space', 'preserve');
-      }
-      t.textContent = value;
-      is.appendChild(t);
-      cell.appendChild(is);
-    }
-    function setCellDate(cellRef, dateObj){
-      setCellNumber(cellRef, excelSerialFromDate(dateObj));
-    }
-    function clearCellValue(cellRef){
-      const cell = sheetDoc.querySelector(`c[r="${cellRef}"]`);
-      if (!cell) return;
-      clearCellChildren(cell);
-      cell.removeAttribute('t');
-    }
-    function forceWorkbookRecalc(){
-      let calcPr = workbookDoc.getElementsByTagName('calcPr')[0];
-      if (!calcPr){
-        calcPr = workbookDoc.createElementNS(workbookDoc.documentElement.namespaceURI, 'calcPr');
-        workbookDoc.documentElement.appendChild(calcPr);
-      }
-      calcPr.setAttribute('calcMode', 'auto');
-      calcPr.setAttribute('fullCalcOnLoad', '1');
-      calcPr.setAttribute('forceFullCalc', '1');
-      calcPr.setAttribute('calcCompleted', '0');
+
+    // Convert a JS Date to Excel serial number (days since 1899-12-31)
+    function excelSerial(d) {
+      const epoch = new Date(1899, 11, 31); // Dec 31 1899
+      return Math.round((d - epoch) / 86400000);
     }
 
     const bp  = (el('businessPurpose')?.value || '').trim();
     const sat = parseISODate(currentWeekEnding);
     const sun = computeSundayFromWeekEnding(currentWeekEnding);
 
-    // Header cells
-    if (bp) setCellText('H5', bp); else clearCellValue('H5');
-    setCellDate('E5', sat);
+    // Business purpose (text) and week-ending date (serial)
+    if (bp) writeText('H5', bp);
+    writeNumber('E5', excelSerial(sat));
 
-    // Date row 7 - write actual Excel dates so the existing date formatting works
+    // Day headers row 7 as Excel date serials (style already formats as date)
     for (let i = 0; i < 7; i++) {
-      const dayDate = new Date(sun);
-      dayDate.setDate(dayDate.getDate() + i);
-      setCellDate(`${dayCols[i]}7`, dayDate);
+      const d = new Date(sun);
+      d.setDate(sun.getDate() + i);
+      writeNumber(dayCols[i] + '7', excelSerial(d));
     }
 
-    // Write one value per cell - Excel handles all totals, never write individual receipts
+    // Expense values — one collapsed number per cell
     allInputs().forEach(inp => {
       if (inp.dataset.computed === 'true') return;
-      const addr = `${inp.dataset.col}${inp.dataset.row}`;
+      const addr = inp.dataset.col + inp.dataset.row;
 
       if (inp.dataset.type === 'currency') {
-        const items = currentData?.entries?.[`${addr}_items`];
-        let exportVal;
+        // If _items exists, collapse to sum; else use input value
+        const items = currentData?.entries?.[addr + '_items'];
+        let val;
         if (Array.isArray(items) && items.length > 0) {
-          exportVal = items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+          val = items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
         } else {
-          const v = (inp.value || '').trim();
-          exportVal = v ? Number(v) : 0;
+          val = Number((inp.value || '').trim()) || 0;
         }
-        if (Number.isFinite(exportVal) && exportVal > 0) setCellNumber(addr, exportVal);
-        else clearCellValue(addr);
+        if (val > 0) writeNumber(addr, val);
       } else if (inp.dataset.type === 'number') {
-        const v = (inp.value || '').trim();
-        const n = v ? Number(v) : 0;
-        if (Number.isFinite(n) && n > 0) setCellNumber(addr, n);
-        else clearCellValue(addr);
+        const n = Number((inp.value || '').trim());
+        if (n > 0) writeNumber(addr, n);
       } else {
         const v = (inp.value || '').trim();
-        if (v) setCellText(addr, v);
-        else clearCellValue(addr);
+        if (v) writeText(addr, v);
       }
     });
 
-    forceWorkbookRecalc();
-
-    zip.file(sheetPath, new XMLSerializer().serializeToString(sheetDoc));
-    zip.file(workbookPath, new XMLSerializer().serializeToString(workbookDoc));
+    zip.file(sheetPath, xml);
     const outBlob = await zip.generateAsync({type:'blob'});
 
-    let filename = `${safeFilenameBase(currentWeekEnding, el('businessPurpose')?.value)}.xlsx`;
+    let filename = safeFilenameBase(currentWeekEnding, bp) + '.xlsx';
     const weekSelectEl = el('weekSelect');
     if (weekSelectEl && weekSelectEl.value) {
-      const opt = weekSelectEl.querySelector(`option[value="${weekSelectEl.value}"]`);
+      const opt = weekSelectEl.querySelector('option[value="' + weekSelectEl.value + '"]');
       if (opt) {
-        let label = opt.textContent.trim().replace(/^\d{2}\.\d{2}\.\d{2}\s*-\s*/, '').trim();
+        const label = opt.textContent.trim().replace(/^\d{2}\.\d{2}\.\d{2}\s*-\s*/, '').trim();
         if (label) filename = label + '.xlsx';
       }
     }
@@ -865,35 +788,12 @@ async function downloadExcel(){
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     setStatus('Excel downloaded.');
-  } catch (e){
+  } catch(e){
     console.error(e);
     setStatus('Excel export failed: ' + e.message);
   }
 }
 
-function setButtonsEnabled(){
-  const hasWeek = !!currentWeekEnding;
-  el('btnSave').disabled = !hasWeek;
-  el('btnClear').disabled = false;
-  el('btnDownload').disabled = !hasWeek;
-  el('btnDeleteWeek').disabled = !(!!currentSync && !!el('weekSelect').value);
-}
-
-function onSundayChange(){
-  const v = el('sundayDate').value;
-  if (!v) return;
-  const sat = computeWeekEndingFromSunday(v);
-  const newWeekEnding = toISODate(sat);
-  if (currentWeekEnding && newWeekEnding !== currentWeekEnding){
-    clearEntryValues();
-    el('weekSelect').value = '';
-    setStatus('New week selected. Entries cleared.');
-  }
-  currentWeekEnding = newWeekEnding;
-  el('weekEnding').value = currentWeekEnding;
-  setHeaderDatesFromSunday(v);
-  setButtonsEnabled();
-}
 
 async function onWeekSelectChange(){
   const we = el('weekSelect').value;
