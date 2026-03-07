@@ -784,6 +784,19 @@ async function downloadExcel(){
       is.appendChild(t);
     }
     setCellStringInline('B7', satISO);
+    setCellStringInline('E5', satISO);
+    setCellStringInline('H5', bp);
+    
+    // Write dates to row 7
+    for (let i = 0; i < 7; i++) {
+      const dayDate = new Date(sun);
+      dayDate.setDate(dayDate.getDate() + i);
+      const month = (dayDate.getMonth() + 1);
+      const day = dayDate.getDate();
+      const year = dayDate.getFullYear();
+      const dateStr = `${month}/${day}/${year}`;
+      setCellStringInline(`${dayCols[i]}7`, dateStr);
+    }
 
     const payload = serialize();
     for (const [addr,val] of Object.entries(payload.entries || {})){
