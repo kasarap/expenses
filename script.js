@@ -721,22 +721,15 @@ async function downloadExcel(){
       v.textContent = String(value);
     }
 
-    // Write week ending to E5
-    updateCell('E5', fmtYYMMDD(sat));
+    // Write week ending to E5 in m/d/yyyy format
+    const month = (sat.getMonth() + 1);
+    const day = sat.getDate();
+    const year = sat.getFullYear();
+    const weekEndingStr = `${month}/${day}/${year}`;
+    updateCell('E5', weekEndingStr);
     
     // Write business purpose to H5
     updateCell('H5', bp);
-    
-    // Write dates to row 7 (DATE row - one for each day)
-    // Excel stores dates as numbers (days since 1900-01-01)
-    for (let i = 0; i < 7; i++) {
-      const dayDate = new Date(sun);
-      dayDate.setDate(dayDate.getDate() + i);
-      
-      // Convert to Excel date number
-      const excelDate = Math.floor((dayDate - new Date(1900, 0, 1)) / 86400000) + 2;
-      updateCell(`${dayCols[i]}7`, excelDate);
-    }
 
     // Write all expense values
     allInputs().forEach(inp => {
