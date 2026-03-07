@@ -711,40 +711,6 @@ async function downloadExcel(){
       if (v) v.textContent = String(value);
     }
 
-    // ── Safe collapse: if _items exists use its sum; otherwise use stored value ──
-    function getCellExportValue(addr, type) {
-      const entries = currentData?.entries || {};
-      const itemsKey = `${addr}_items`;
-
-      if (type === 'currency') {
-        const items = entries[itemsKey];
-        if (Array.isArray(items) && items.length > 0) {
-          // Source of truth: collapse items to single total
-          const total = items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-          return total > 0 ? total : null;
-        }
-        // Fall back to stored scalar value (legacy format)
-        const stored = entries[addr];
-        if (stored != null && stored !== '') {
-          const n = Number(stored);
-          if (Number.isFinite(n) && n > 0) return n;
-        }
-        return null;
-      }
-
-      if (type === 'number') {
-        const stored = entries[addr];
-        if (stored != null && stored !== '') {
-          const n = Number(stored);
-          if (Number.isFinite(n) && n > 0) return n;
-        }
-        return null;
-      }
-
-      // text
-      return entries[addr] || null;
-    }
-
     const bp  = (el('businessPurpose')?.value || '').trim();
     const sat = parseISODate(currentWeekEnding);
     const sun = computeSundayFromWeekEnding(currentWeekEnding);
@@ -760,15 +726,33 @@ async function downloadExcel(){
       updateCellValue(`${dayCols[i]}7`, `${dayDate.getMonth()+1}/${dayDate.getDate()}/${dayDate.getFullYear()}`);
     }
 
-    // Expense rows — one collapsed value per cell, Excel handles all totals
-    rows.forEach(r => {
-      if (r.type === 'divider' || r.computed) return;
-      dayCols.forEach(col => {
-        const addr = `${col}${r.row}`;
-        const val  = getCellExportValue(addr, r.type);
-        if (val == null) return;
-        updateCellValue(addr, val);
-      });
+    // Write one value per cell — Excel handles all totals, never write individual receipts
+    allInputs().forEach(inp => {
+      if (inp.dataset.computed === 'true') return;
+      const addr = `${inp.dataset.col}${inp.dataset.row}`;
+
+      if (inp.dataset.type === 'currency') {
+        // If _items exists, collapse to sum (source of truth); else use input value
+        const items = currentData?.entries?.[`${addr}_items`];
+        let exportVal;
+        if (Array.isArray(items) && items.length > 0) {
+          exportVal = items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+        } else {
+          const v = (inp.value || '').trim();
+          exportVal = v ? Number(v) : 0;
+        }
+        if (Number.isFinite(exportVal) && exportVal > 0) {
+          updateCellValue(addr, exportVal);
+        }
+      } else if (inp.dataset.type === 'number') {
+        const v = (inp.value || '').trim();
+        if (!v) return;
+        const n = Number(v);
+        if (Number.isFinite(n) && n > 0) updateCellValue(addr, n);
+      } else {
+        const v = (inp.value || '').trim();
+        if (v) updateCellValue(addr, v);
+      }
     });
 
     zip.file(sheetPath, new XMLSerializer().serializeToString(sheetDoc));
