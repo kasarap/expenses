@@ -167,6 +167,18 @@ function buildTable(){
         wrap.className='currency-wrap';
         wrap.appendChild(inp);
         td.appendChild(wrap);
+        
+        // Add (+) button for currency cells
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'cell-add-btn';
+        addBtn.textContent = '+';
+        addBtn.dataset.addr = `${col}${r.row}`;
+        addBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          openLineItemModal(`${col}${r.row}`, r.label, dayId);
+        });
+        td.appendChild(addBtn);
       } else {
         td.appendChild(inp);
       }
