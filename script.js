@@ -49,7 +49,7 @@ let weeksCache = []; // [{weekEnding,businessPurpose,updatedAt}]
 let loading = false;
 let currentData = null; // Holds the full entry data (including line items)
 let currentEditAddr = null; // Address being edited in modal
-const APP_VERSION = '55'; // Update this for each revision
+const APP_VERSION = '56'; // Update this for each revision
 
 // ============ LINE-ITEM MANAGEMENT ============
 
@@ -685,8 +685,7 @@ async function deleteWeek(){
 
 async function downloadExcel(){
   if (!currentWeekEnding){ setStatus('Enter a Sunday date first.'); return; }
-  if (!ensureSync()) { setStatus('Sync Name not set.'); return; }
-
+  
   setStatus('Building Excel…');
   try{
     if (typeof JSZip === 'undefined') throw new Error('JSZip library not loaded');
@@ -697,84 +696,21 @@ async function downloadExcel(){
     }
     if (!res || !res.ok) throw new Error('Template not found');
     const ab = await res.arrayBuffer();
-    const zip = await JSZip.loadAsync(ab);
+    const outBlob = new Blob([ab], {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
 
-    const sheetPath = 'xl/worksheets/sheet1.xml';
-    const sheetXml = await zip.file(sheetPath).async('string');
-    const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml');
-    const xmlNS = sheetDoc.documentElement.namespaceURI;
-
-    const bp = (el('businessPurpose')?.value || '').trim();
+    const bp = el('businessPurpose').value || 'Expenses';
     const sat = parseISODate(currentWeekEnding);
     const sun = computeSundayFromWeekEnding(currentWeekEnding);
 
-    // Function to update cell values simply
-    function updateCell(cellRef, value) {
-      const cell = sheetDoc.querySelector(`c[r="${cellRef}"]`);
-      if (!cell) return;
-      
-      let v = cell.querySelector('v');
-      if (!v) {
-        v = sheetDoc.createElementNS(xmlNS, 'v');
-        cell.appendChild(v);
-      }
-      v.textContent = String(value);
-    }
-
-    // Write week ending to E5 in m/d/yyyy format
-    const month = (sat.getMonth() + 1);
-    const day = sat.getDate();
-    const year = sat.getFullYear();
-    const weekEndingStr = `${month}/${day}/${year}`;
-    updateCell('E5', weekEndingStr);
-    
-    // Write business purpose to H5
-    updateCell('H5', bp);
-    
-    // Write dates to row 7 (DATE row - one for each day)
-    for (let i = 0; i < 7; i++) {
-      const dayDate = new Date(sun);
-      dayDate.setDate(dayDate.getDate() + i);
-      // Format as m/d/yyyy
-      const month = (dayDate.getMonth() + 1);
-      const day = dayDate.getDate();
-      const year = dayDate.getFullYear();
-      const dateStr = `${month}/${day}/${year}`;
-      updateCell(`${dayCols[i]}7`, dateStr);
-    }
-
-    // Write all expense values
-    allInputs().forEach(inp => {
-      if (inp.dataset.computed === 'true') return;
-      const val = inp.value ? inp.value.trim() : '';
-      if (!val) return;
-
-      const addr = `${inp.dataset.col}${inp.dataset.row}`;
-
-      if (inp.dataset.type === 'number' || inp.dataset.type === 'currency') {
-        const n = Number(val);
-        if (Number.isFinite(n) && n > 0) {
-          updateCell(addr, n);
-        }
-      } else {
-        updateCell(addr, val);
-      }
-    });
-
-    zip.file(sheetPath, new XMLSerializer().serializeToString(sheetDoc));
-    const outBlob = await zip.generateAsync({type:'blob'});
-
-    // Filename: just the saved entry label without date prefix
-    let filename = `Week ${fmtMD(sun)} through ${fmtMD(sat)} - Angelton.xlsx`;
+    // Filename
+    let filename = `Week ${fmtMD(sun)} through ${fmtMD(sat)} - ${bp}.xlsx`;
     
     const weekSelectEl = el('weekSelect');
     if (weekSelectEl && weekSelectEl.value) {
       const selectedOption = weekSelectEl.querySelector(`option[value="${weekSelectEl.value}"]`);
       if (selectedOption) {
         let optionText = selectedOption.textContent.trim();
-        // Remove date prefix like "26.03.07 - "
         optionText = optionText.replace(/^\d{2}\.\d{2}\.\d{2}\s*-\s*/, '').trim();
-        // Result: "Week 3-1 through 3-7 - Angelton"
         filename = optionText + '.xlsx';
       }
     }
