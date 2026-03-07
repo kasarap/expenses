@@ -700,36 +700,42 @@ async function downloadExcel(){
     const zip = await JSZip.loadAsync(ab);
 
     const sheetPath = 'xl/worksheets/sheet1.xml';
-    const sheetXml = await zip.file(sheetPath).async('string');
-    const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml');
-    const xmlNS = sheetDoc.documentElement.namespaceURI;
+    let sheetXml = await zip.file(sheetPath).async('string');
 
     const bp = (el('businessPurpose')?.value || '').trim();
     const sat = parseISODate(currentWeekEnding);
     const sun = computeSundayFromWeekEnding(currentWeekEnding);
 
-    // Function to update cell values simply
-    function updateCell(cellRef, value) {
-      const cell = sheetDoc.querySelector(`c[r="${cellRef}"]`);
-      if (!cell) return;
-      
-      let v = cell.querySelector('v');
-      if (!v) {
-        v = sheetDoc.createElementNS(xmlNS, 'v');
-        cell.appendChild(v);
+    // Minimal XML modification - just find <v> tags and update their values
+    function updateCellValue(xml, cellRef, value) {
+      const regex = new RegExp(`(<c r="${cellRef}"[^>]*>)(.*?)(<v>.*?</v>|)(.*?)(</c>)`, 's');
+      const match = xml.match(regex);
+      if (match) {
+        const [, opening, before, oldV, after, closing] = match;
+        const newV = `<v>${value}</v>`;
+        return xml.replace(regex, opening + newV + after + closing);
       }
-      v.textContent = String(value);
+      return xml;
     }
 
-    // Write week ending to E5 in m/d/yyyy format
+    // Update values
     const month = (sat.getMonth() + 1);
     const day = sat.getDate();
     const year = sat.getFullYear();
     const weekEndingStr = `${month}/${day}/${year}`;
-    updateCell('E5', weekEndingStr);
-    
-    // Write business purpose to H5
-    updateCell('H5', bp);
+    sheetXml = updateCellValue(sheetXml, 'E5', weekEndingStr);
+    sheetXml = updateCellValue(sheetXml, 'H5', bp);
+
+    // Update dates in row 7
+    for (let i = 0; i < 7; i++) {
+      const dayDate = new Date(sun);
+      dayDate.setDate(dayDate.getDate() + i);
+      const m = (dayDate.getMonth() + 1);
+      const d = dayDate.getDate();
+      const y = dayDate.getFullYear();
+      const dateStr = `${m}/${d}/${y}`;
+      sheetXml = updateCellValue(sheetXml, `${dayCols[i]}7`, dateStr);
+    }
 
     // Write all expense values
     allInputs().forEach(inp => {
@@ -742,17 +748,17 @@ async function downloadExcel(){
       if (inp.dataset.type === 'number' || inp.dataset.type === 'currency') {
         const n = Number(val);
         if (Number.isFinite(n) && n > 0) {
-          updateCell(addr, n);
+          sheetXml = updateCellValue(sheetXml, addr, String(n));
         }
       } else {
-        updateCell(addr, val);
+        sheetXml = updateCellValue(sheetXml, addr, val);
       }
     });
 
-    zip.file(sheetPath, new XMLSerializer().serializeToString(sheetDoc));
+    zip.file(sheetPath, sheetXml);
     const outBlob = await zip.generateAsync({type:'blob'});
 
-    // Filename: just the saved entry label without date prefix
+    // Filename
     let filename = `Week ${fmtMD(sun)} through ${fmtMD(sat)} - Angelton.xlsx`;
     
     const weekSelectEl = el('weekSelect');
@@ -760,9 +766,7 @@ async function downloadExcel(){
       const selectedOption = weekSelectEl.querySelector(`option[value="${weekSelectEl.value}"]`);
       if (selectedOption) {
         let optionText = selectedOption.textContent.trim();
-        // Remove date prefix like "26.03.07 - "
         optionText = optionText.replace(/^\d{2}\.\d{2}\.\d{2}\s*-\s*/, '').trim();
-        // Result: "Week 3-1 through 3-7 - Angelton"
         filename = optionText + '.xlsx';
       }
     }
