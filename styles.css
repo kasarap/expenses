@@ -13,7 +13,7 @@
 }
 
 *{box-sizing:border-box}
-html,body{height:100%}
+html,body{height:100%;width:100%;overflow-x:hidden}
 body{
   margin:0;
   font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
@@ -47,6 +47,7 @@ body{
 .card{
   background:var(--card);border:1px solid var(--line);
   border-radius:14px;padding:14px;
+  overflow:hidden; /* children cannot bleed past card border */
 }
 h2{margin:0 0 10px 0;font-size:16px}
 
@@ -56,8 +57,31 @@ input,select{
   border:1px solid var(--line);background:var(--input-bg);color:var(--text);
   outline:none;font-size:16px; /* 16px prevents iOS zoom */
   font-family:inherit;
-  width:100%;min-width:0; /* prevent overflow on mobile */
+  width:100%;min-width:0;max-width:100%;
   box-sizing:border-box;
+  -webkit-appearance:none;
+  appearance:none;
+}
+
+/* iOS Safari intrinsically sizes <input type="date"> wider than its container.
+   Force it to behave exactly like a plain text input. */
+input[type="date"]{
+  display:block;
+  width:100%;
+  min-width:0;
+  max-width:100%;
+  -webkit-appearance:none;
+  appearance:none;
+  text-align:center;
+}
+/* Kill Safari's internal date input pieces that can expand width */
+input[type="date"]::-webkit-date-and-time-value{
+  text-align:center;
+  width:100%;
+  min-width:0;
+}
+input[type="date"]::-webkit-calendar-picker-indicator{
+  margin-left:0;
 }
 input:focus,select:focus{border-color:var(--accent)}
 input:disabled,select:disabled{opacity:.7}
@@ -100,22 +124,45 @@ button.danger{background:#2a1212;border-color:#5a1f1f;color:#ffd1d1}
 @media (max-width:820px){
   .mobile-only{display:block}
   .desktop-only{display:none}
-  .grid3{grid-template-columns:1fr}
-  .grid2{grid-template-columns:1fr}
+
+  /* Force all grids to single column */
+  .grid3,.grid2{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+  }
+
+  /* Wrap and card tightened */
   .wrap{padding:10px}
   .card{padding:12px;border-radius:12px}
-  /* prevent any child from punching through card borders */
-  .card *{max-width:100%;box-sizing:border-box}
-  /* bar: stack save-info on small screens */
+
+  /* Every flex/grid child must respect its container width */
+  .grid3 > *,
+  .grid2 > *{
+    width:100%;
+    min-width:0;
+    flex-shrink:1;
+  }
+
+  /* date inputs specifically — iOS needs explicit block + width */
+  input[type="date"]{
+    display:block;
+    width:100%;
+    -webkit-appearance:none;
+    appearance:none;
+  }
+
+  /* Bar wraps on small screens */
   .bar{padding:10px 12px;flex-wrap:wrap;gap:8px}
   .save-info{min-width:0}
   .last-saved{white-space:normal}
-  /* row buttons: fill width */
   .row{gap:8px}
 }
 
 /* ===== DESKTOP table ===== */
 .tablewrap{overflow:auto;border:1px solid var(--line);border-radius:12px}
+/* Desktop table card: let overflow be visible so the inner tablewrap can scroll */
+.desktop-only.card{overflow:visible}
 table{width:100%;border-collapse:separate;border-spacing:0;min-width:860px}
 th,td{border-bottom:1px solid var(--line);padding:8px;font-size:12px;vertical-align:middle}
 thead th{position:sticky;top:0;background:#0e1218;z-index:2}
