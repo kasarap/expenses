@@ -11,10 +11,14 @@
   <header class="bar">
     <div class="bar-left">
       <div class="title">Weekly Expenses</div>
-      <div class="sub">Autosaved &bull; Sync by Week Ending (Saturday)</div>
+      <div class="sub">Cloud sync &bull; Week Ending (Saturday)</div>
     </div>
     <div class="bar-right">
-      <span id="saveStatus" class="status" aria-live="polite"></span>
+      <div class="save-info">
+        <span id="saveStatus" class="status" aria-live="polite"></span>
+        <span id="lastSaved" class="last-saved"></span>
+      </div>
+      <button id="btnSave" class="ghost" disabled>Save</button>
       <button id="btnDownload" class="primary" disabled>Download Excel</button>
     </div>
   </header>

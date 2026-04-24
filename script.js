@@ -1214,12 +1214,21 @@ async function changeSync(){
 }
 
 // ==================== MISC UI ====================
-function setStatus(msg=''){ el('saveStatus').textContent = msg; }
+function setStatus(msg=''){
+  el('saveStatus').textContent = msg;
+  if (msg === 'Saved ✓'){
+    const now = new Date();
+    const time = now.toLocaleTimeString(undefined, {hour:'numeric', minute:'2-digit'});
+    const date = now.toLocaleDateString(undefined, {month:'short', day:'numeric'});
+    el('lastSaved').textContent = `Last saved ${date} at ${time}`;
+  }
+}
 function setButtonsEnabled(){
   const hasWeek = !!currentWeekEnding;
   el('btnDownload').disabled = !hasWeek;
   el('btnDeleteWeek').disabled = !el('weekSelect').value;
   el('btnNewReport').disabled = !hasWeek;
+  el('btnSave').disabled = !hasWeek || !currentSync;
 }
 function onSundayChange(){
   const v = el('sundayDate').value;
@@ -1267,6 +1276,10 @@ async function init(){
   el('btnDeleteWeek').addEventListener('click', deleteCurrentReport);
   el('btnClear').addEventListener('click', startOver);
   el('btnNewReport').addEventListener('click', newReportSameWeek);
+  el('btnSave').addEventListener('click', ()=>{
+    clearTimeout(autosaveTimer);
+    performAutosave();
+  });
   el('btnDownload').addEventListener('click', downloadExcel);
   el('btnChangeSync').addEventListener('click', changeSync);
 

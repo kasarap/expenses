@@ -34,6 +34,8 @@ body{
 .title{font-size:18px;font-weight:700}
 .sub{font-size:12px;color:var(--muted);margin-top:2px}
 .bar-right{display:flex;align-items:center;gap:10px}
+.save-info{display:flex;flex-direction:column;align-items:flex-end;gap:2px;min-width:80px}
+.last-saved{font-size:11px;color:var(--muted);white-space:nowrap}
 
 /* ===== Layout ===== */
 .wrap{
@@ -48,12 +50,14 @@ body{
 }
 h2{margin:0 0 10px 0;font-size:16px}
 
-label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)}
+label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted);min-width:0}
 input,select{
   padding:10px;border-radius:10px;
   border:1px solid var(--line);background:var(--input-bg);color:var(--text);
   outline:none;font-size:16px; /* 16px prevents iOS zoom */
   font-family:inherit;
+  width:100%;min-width:0; /* prevent overflow on mobile */
+  box-sizing:border-box;
 }
 input:focus,select:focus{border-color:var(--accent)}
 input:disabled,select:disabled{opacity:.7}
@@ -98,6 +102,16 @@ button.danger{background:#2a1212;border-color:#5a1f1f;color:#ffd1d1}
   .desktop-only{display:none}
   .grid3{grid-template-columns:1fr}
   .grid2{grid-template-columns:1fr}
+  .wrap{padding:10px}
+  .card{padding:12px;border-radius:12px}
+  /* prevent any child from punching through card borders */
+  .card *{max-width:100%;box-sizing:border-box}
+  /* bar: stack save-info on small screens */
+  .bar{padding:10px 12px;flex-wrap:wrap;gap:8px}
+  .save-info{min-width:0}
+  .last-saved{white-space:normal}
+  /* row buttons: fill width */
+  .row{gap:8px}
 }
 
 /* ===== DESKTOP table ===== */
