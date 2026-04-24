@@ -1,22 +1,30 @@
+// /api/weeks
+// Returns all reports for a given sync, across all weeks.
+// Each entry: { weekEnding, reportId, businessPurpose, updatedAt, legacy }
+// Sorted: newest weekEnding first; within a week, most recently updated first.
 
 export async function onRequest(context) {
   const { request, env } = context;
   const url = new URL(request.url);
   const sync = (url.searchParams.get('sync') || '').trim();
-  if (!sync) return json({ weeks: [] }, 200);
+  if (!sync) return json({ reports: [] }, 200);
 
   const prefix = `expenses:${sync}:`;
   let cursor = undefined;
-  const weeks = [];
+  const reports = [];
   while (true) {
     const page = await env.EXPENSES_KV.list({ prefix, cursor, limit: 1000 });
     for (const k of page.keys) {
-      const we = k.name.slice(prefix.length);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(we)) continue;
-      // read minimal record to get businessPurpose + updatedAt
+      const suffix = k.name.slice(prefix.length);
+      const m = /^(\d{4}-\d{2}-\d{2})(?::(.+))?$/.exec(suffix);
+      if (!m) continue;
+      const weekEnding = m[1];
+      const reportId = m[2] || ''; // empty string = legacy key
       const rec = await env.EXPENSES_KV.get(k.name, 'json');
-      weeks.push({
-        weekEnding: we,
+      reports.push({
+        weekEnding,
+        reportId,
+        legacy: !reportId,
         businessPurpose: rec?.businessPurpose || rec?.data?.businessPurpose || '',
         updatedAt: rec?.updatedAt || ''
       });
@@ -26,10 +34,14 @@ export async function onRequest(context) {
     if (!cursor) break;
   }
 
-  // sort newest weekEnding first
-  weeks.sort((a,b) => (b.weekEnding || '').localeCompare(a.weekEnding || ''));
+  reports.sort((a, b) => {
+    if (a.weekEnding !== b.weekEnding) {
+      return b.weekEnding.localeCompare(a.weekEnding);
+    }
+    return (b.updatedAt || '').localeCompare(a.updatedAt || '');
+  });
 
-  return json({ weeks }, 200);
+  return json({ reports }, 200);
 }
 
 function json(obj, status = 200) {
