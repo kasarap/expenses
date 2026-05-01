@@ -46,7 +46,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '59-v2';
+const APP_VERSION = '60-v2-occ';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
@@ -58,6 +58,8 @@ let loading = false;
 let currentEditAddr = null;   // line-item modal state
 let activeDayIdx = null;      // day sheet state (0..6)
 let autosaveTimer = null;
+let clientKnownUpdatedAt = null; // server's updatedAt at last load/save; null = no baseline (new report)
+let conflictPaused = false;   // when true, autosave is suspended pending user reload/override
 
 // ==================== SLUG / REPORT ID ====================
 function slugifyBP(bp){
@@ -671,6 +673,9 @@ function startOver(){
   setHeaderDatesFromSunday('');
   currentWeekEnding = '';
   currentReportId = '';
+  clientKnownUpdatedAt = null;
+  conflictPaused = false;
+  const cb = el('conflictBanner'); if (cb) cb.remove();
   el('weekSelect').value = '';
   clearEntryValues();
   setButtonsEnabled();
@@ -685,6 +690,9 @@ function newReportSameWeek(){
   }
   // Keep the sync and the dates; drop the report identity and entries.
   currentReportId = '';
+  clientKnownUpdatedAt = null;
+  conflictPaused = false;
+  const cb = el('conflictBanner'); if (cb) cb.remove();
   clearEntryValues();
   el('weekSelect').value = '';
   setButtonsEnabled();
@@ -805,7 +813,12 @@ async function apiFetchJson(url, opts={}){
   if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
   const res = await fetch(url, { ...opts, headers });
   const txt = await res.text().catch(()=> '');
-  if (!res.ok) throw new Error(txt || `${res.status} ${res.statusText}`);
+  if (!res.ok){
+    const err = new Error(txt || `${res.status} ${res.statusText}`);
+    err.status = res.status;
+    try { err.body = txt ? JSON.parse(txt) : null; } catch { err.body = null; }
+    throw err;
+  }
   return txt ? JSON.parse(txt) : {};
 }
 
@@ -867,6 +880,8 @@ async function loadReport(meta){
     const out = await apiFetchJson(`${API.data}?${qs.toString()}`);
     currentWeekEnding = meta.weekEnding;
     currentReportId = meta.reportId || '';
+    clientKnownUpdatedAt = out.updatedAt || null;
+    conflictPaused = false;
     el('weekEnding').value = meta.weekEnding;
     el('sundayDate').value = toISODate(computeSundayFromWeekEnding(meta.weekEnding));
     setHeaderDatesFromSunday(el('sundayDate').value);
@@ -884,7 +899,7 @@ async function loadReport(meta){
 
 // ==================== AUTOSAVE ====================
 function canAutosave(){
-  return !!currentSync && !!currentWeekEnding && !loading;
+  return !!currentSync && !!currentWeekEnding && !loading && !conflictPaused;
 }
 function scheduleAutosave(){
   if (!canAutosave()) return;
@@ -908,6 +923,8 @@ async function performAutosave(){
     if (candidate !== 'untitled' && candidate !== currentReportId){
       oldReportIdToClean = currentReportId;
       currentReportId = candidate;
+      // New slug → fresh key with no server record yet.
+      clientKnownUpdatedAt = null;
     }
   }
   // For any other existing reportId we keep the key stable — renaming happens
@@ -915,13 +932,16 @@ async function performAutosave(){
 
   setStatus('Saving…');
   try{
-    const body = JSON.stringify(serialize());
+    const payload = serialize();
+    payload.clientKnownUpdatedAt = clientKnownUpdatedAt || '';
+    const body = JSON.stringify(payload);
     const qs = new URLSearchParams({
       sync: currentSync,
       weekEnding: currentWeekEnding,
       reportId: currentReportId
     });
-    await apiFetchJson(`${API.data}?${qs.toString()}`, { method:'PUT', body });
+    const out = await apiFetchJson(`${API.data}?${qs.toString()}`, { method:'PUT', body });
+    if (out && out.updatedAt) clientKnownUpdatedAt = out.updatedAt;
 
     // If we promoted untitled → real slug, delete the untitled key.
     if (oldReportIdToClean){
@@ -942,7 +962,7 @@ async function performAutosave(){
     const existing = reportsCache.find(r =>
       r.weekEnding === currentWeekEnding && r.reportId === currentReportId && !r.legacy
     );
-    const nowIso = new Date().toISOString();
+    const nowIso = clientKnownUpdatedAt || new Date().toISOString();
     if (existing){
       existing.businessPurpose = bp;
       existing.updatedAt = nowIso;
@@ -962,8 +982,67 @@ async function performAutosave(){
     renderWeeksDropdown();
     setStatus('Saved ✓');
   } catch(e){
+    if (e && e.status === 409){
+      // Another device wrote a newer version. Stop autosaving until the user
+      // decides — reload (recommended, drops local edits) or overwrite.
+      conflictPaused = true;
+      clearTimeout(autosaveTimer);
+      showConflictBanner();
+      setStatus('Conflict — newer data on another device.');
+      return;
+    }
     console.error(e);
     setStatus('Save failed — will retry on next change.');
+  }
+}
+
+function showConflictBanner(){
+  let banner = el('conflictBanner');
+  if (!banner){
+    banner = document.createElement('div');
+    banner.id = 'conflictBanner';
+    banner.style.cssText = [
+      'position:fixed','left:0','right:0','top:0','z-index:9999',
+      'background:#7a1f1f','color:#fff','padding:10px 14px',
+      'font:600 14px/1.3 system-ui,-apple-system,Segoe UI,Roboto,sans-serif',
+      'display:flex','gap:10px','align-items:center','justify-content:center',
+      'flex-wrap:wrap','box-shadow:0 2px 8px rgba(0,0,0,.4)'
+    ].join(';');
+    banner.innerHTML = `
+      <span>This report was updated on another device. Your unsaved local edits won't be saved automatically.</span>
+      <button id="conflictReload" style="background:#fff;color:#7a1f1f;border:0;border-radius:6px;padding:6px 12px;font-weight:700;cursor:pointer;">Reload latest</button>
+      <button id="conflictOverwrite" style="background:transparent;color:#fff;border:1px solid #fff;border-radius:6px;padding:6px 12px;font-weight:700;cursor:pointer;">Overwrite with mine</button>
+    `;
+    document.body.appendChild(banner);
+    el('conflictReload').addEventListener('click', async ()=>{
+      banner.remove();
+      conflictPaused = false;
+      try {
+        await loadReport({ weekEnding: currentWeekEnding, reportId: currentReportId });
+      } catch {}
+    });
+    el('conflictOverwrite').addEventListener('click', async ()=>{
+      banner.remove();
+      conflictPaused = false;
+      // Force a save that ignores the baseline check.
+      try {
+        const payload = serialize();
+        payload.force = true;
+        const body = JSON.stringify(payload);
+        const qs = new URLSearchParams({
+          sync: currentSync,
+          weekEnding: currentWeekEnding,
+          reportId: currentReportId
+        });
+        setStatus('Saving…');
+        const out = await apiFetchJson(`${API.data}?${qs.toString()}`, { method:'PUT', body });
+        if (out && out.updatedAt) clientKnownUpdatedAt = out.updatedAt;
+        setStatus('Saved ✓');
+      } catch (err){
+        console.error(err);
+        setStatus('Overwrite failed.');
+      }
+    });
   }
 }
 
@@ -1001,6 +1080,9 @@ async function deleteCurrentReport(){
       clearEntryValues();
       currentWeekEnding = '';
       currentReportId = '';
+      clientKnownUpdatedAt = null;
+      conflictPaused = false;
+      const cb = el('conflictBanner'); if (cb) cb.remove();
       el('sundayDate').value = '';
       el('weekEnding').value = '';
     }
@@ -1238,6 +1320,9 @@ function onSundayChange(){
   if (currentWeekEnding && newWeekEnding !== currentWeekEnding){
     clearEntryValues();
     currentReportId = '';
+    clientKnownUpdatedAt = null;
+    conflictPaused = false;
+    const cb = el('conflictBanner'); if (cb) cb.remove();
     el('weekSelect').value = '';
     setStatus('New week selected. Entries cleared.');
   }
@@ -1309,7 +1394,9 @@ async function init(){
       // Best-effort synchronous-ish save; fetch keepalive works on unload.
       if (canAutosave()){
         try{
-          const body = JSON.stringify(serialize());
+          const payload = serialize();
+          payload.clientKnownUpdatedAt = clientKnownUpdatedAt || '';
+          const body = JSON.stringify(payload);
           if (!currentReportId){
             currentReportId = computeReportId(el('businessPurpose').value || '', currentWeekEnding);
           }

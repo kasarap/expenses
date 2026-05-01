@@ -1,174 +1,308 @@
 # Weekly Expenses — Reference Notes (v2)
 
-Internal reference for the project. Updated after the v2 rewrite.
-Deployed target: `https://exp.jonmercado.com/`.
+Internal reference for the project. Kept current as the canonical
+handoff document — Claude should be able to plan changes from this file
+alone, without the zip attached.
 
-## What changed in v2
+Deployed target: `https://exp.jonmercado.com/` (Cloudflare Pages + KV).
+Current `APP_VERSION` constant: `60-v2-occ`.
 
-1. **Multiple reports per week.** The KV key is now
-   `expenses:{sync}:{weekEnding}:{reportId}`. `reportId` is a slug derived
-   from the Business Purpose (`"Angelton Flights"` → `"angelton-flights"`).
-   If the same week already has a report with that exact slug, new ones
-   get numbered: `angelton-flights-2`, `angelton-flights-3`, etc.
-   **Legacy keys** (`expenses:{sync}:{weekEnding}` from v1) still load
-   correctly and show in the dropdown with a `(legacy)` suffix.
+---
 
-2. **Autosave.** Every form edit debounces an 800ms save via `PUT /api/data`.
-   Status pill in the header shows `Typing…` → `Saving…` → `Saved ✓`.
-   The old "Save now" button is gone. `beforeunload` does a best-effort
-   `keepalive` PUT to avoid losing the last keystroke.
+## What changed in v2 (history)
 
-3. **Mobile-first entry UX.** Below 820px viewport the desktop 7-column
-   table is hidden. Instead the user sees:
-   - A 7-tile **day strip** (SUN…SAT), each tile shows the date number
-     and the running total for that day. Tiles with entries glow blue.
-   - Tapping a tile opens a **full-screen day sheet** showing every
-     category for that day in sections (Travel / Meals / Travel & Lodging
-     / Other). Left/right arrows in the sheet header navigate between
-     days. Day total updates live in the footer.
-   - The line-item `+` modal still works from within the day sheet.
-   - Desktop (≥820px) still uses the original sticky-grid table.
+1. **Multiple reports per week.** KV key:
+   `expenses:{sync}:{weekEnding}:{reportId}`. `reportId` is a slug from
+   the Business Purpose. Same-slug collisions in the same week →
+   `-2`, `-3`, … Legacy v1 keys (`expenses:{sync}:{weekEnding}`) still
+   load and show in the dropdown with `(legacy)`.
 
-4. **Cleanup.**
-   - Deleted orphan root `data.js` and `weeks.js` (the `functions/api/*`
-     versions are what Cloudflare Pages actually routes).
-   - Deleted the unused `<dialog id="syncDialog">` markup and related
-     `.dialog` CSS — sync name still uses native `prompt()`.
-   - Deleted the no-op `updateCellItemsDisplay()` function.
-   - Deleted `expenses-kv-webapp-v36.zip` (old bundled dupe).
-   - Removed duplicate `.currency-wrap` CSS block that was pasted twice.
-   - Consolidated color tokens into `:root` and added `--success`,
-     `--accent-weak`, `--input-bg`.
-   - Fixed "Weekly Expen ses" typo in the banner comment.
-   - Updated README with correct cell targets (E5/H5, not the old E4/G4
-     that the README used to claim).
+2. **Autosave.** Every form edit debounces an 800ms PUT. Status pill
+   shows `Typing…` → `Saving…` → `Saved ✓`. The old "Save now" button
+   is gone. `beforeunload` does a best-effort `keepalive` PUT.
+
+3. **Mobile-first entry UX.** Below 820px viewport: 7-tile day strip,
+   tap a tile → full-screen day sheet with categories grouped by
+   `Travel / Meals / Travel & Lodging / Other`. Desktop (≥820px) keeps
+   the original sticky-grid table.
+
+4. **Cleanup.** Removed orphan root `data.js`/`weeks.js`, unused
+   `<dialog id="syncDialog">`, no-op `updateCellItemsDisplay()`, old
+   bundled zip, duplicate `.currency-wrap` CSS. Consolidated color
+   tokens into `:root` (`--success`, `--accent-weak`, `--input-bg`).
+
+5. **Optimistic concurrency control (OCC) — `60-v2-occ`.** Prevents
+   stale tabs (e.g. phone left open with empty fields) from clobbering
+   edits made on another device. See "OCC / multi-device" below.
+
+---
 
 ## File layout
 
 ```
 expenses/
-├── index.html                 UI markup (mobile + desktop blocks)
-├── styles.css                 dark theme, mobile/desktop media at 820px
-├── script.js                  all client logic
-├── README.txt                 deploy + overview
-├── REFERENCE.md               this file
-├── Expenses Form.xlsx         template fetched at export time (unchanged)
-├── jszip.min.js               fallback JSZip (loaded if vendor/ fails)
-├── vendor/jszip.min.js        primary JSZip path
+├── index.html                 ~164 lines. UI markup — desktop table block
+│                              (.desktop-only) + mobile day strip / day
+│                              sheet (.mobile-only) + line-item modal +
+│                              header. No <form>; all event-driven.
+├── styles.css                 ~449 lines. Dark theme. Tokens in :root.
+│                              Mobile/desktop split at @media (max-width: 820px).
+├── script.js                  ~1424 lines. All client logic (see map below).
+├── README.txt                 Deploy + usage overview.
+├── REFERENCE.md               This file.
+├── Expenses Form.xlsx         Template fetched at export time. Untouched
+│                              by the app — only modified in-memory during
+│                              download.
+├── jszip.min.js               Fallback JSZip (loaded if vendor/ fails).
+├── vendor/jszip.min.js        Primary JSZip path (~96K).
 └── functions/api/
-    ├── data.js                GET/PUT/DELETE /api/data  (reportId-aware)
-    ├── weeks.js               GET /api/weeks  (returns {reports:[...]})
-    ├── login.js               POST /api/login → HMAC token (14d)
-    └── _auth.js               requireAuth helper (HMAC verify)
+    ├── data.js   ~132 lines.  GET/PUT/DELETE /api/data. reportId-aware.
+    │                          Implements OCC on PUT.
+    ├── weeks.js  ~52 lines.   GET /api/weeks → {reports:[…]}.
+    ├── login.js  ~54 lines.   POST /api/login → HMAC token (14d). Not enforced.
+    └── _auth.js  ~44 lines.   requireAuth helper. Not used anywhere.
 ```
 
-## Data model (v2)
+---
 
-- **Sync Name** — same as v1. Namespace per user. Stored in
-  `localStorage['expenses_sync_name']`. Sanitized to ≤80 chars.
-- **Week Ending** — Saturday. ISO `YYYY-MM-DD`. Derived from Sunday +6.
-- **reportId** — slug of Business Purpose, 1–40 chars of `[a-z0-9-]`.
-  Unique per `(sync, weekEnding)`. Collision → `-2`, `-3`, …
+## Data model
+
+- **Sync Name** — namespace per user. `localStorage['expenses_sync_name']`.
+  Sanitized to ≤80 chars. Single-line, whitespace collapsed.
+- **Week Ending** — Saturday, ISO `YYYY-MM-DD`. Derived from
+  `Sunday + 6` via `computeWeekEndingFromSunday()`.
+- **reportId** — slug of BP, 1–40 chars `[a-z0-9-]`. Unique per
+  `(sync, weekEnding)`. Collision → `-2`, `-3`. Empty BP → `untitled`.
 - **KV key**: `expenses:{sync}:{weekEnding}:{reportId}`.
-- **KV value**:
+- **KV value** (server-side wrapper around `data`):
   ```js
   {
     sync, weekEnding, reportId, businessPurpose, updatedAt,
-    data: { syncName, weekEnding, reportId, businessPurpose, entries: {...} }
+    data: { syncName, weekEnding, reportId, businessPurpose, entries: {…} }
   }
   ```
 - **entries** map keyed by Excel cell address:
   - `"C8": "Philadelphia"` (text)
   - `"C18": 245.5` (currency/number)
-  - Line-itemized cells: `"C18": <sum>` plus `"C18_items": [{id, amount, vendor, note}, ...]`
+  - Line-itemized: `"C18": <sum>` plus
+    `"C18_items": [{id, amount, vendor, note}, …]`
 
-## API (v2)
+---
 
-- `GET  /api/data?sync=&weekEnding=&reportId=` → `{data | null}`
-- `GET  /api/data?sync=&weekEnding=`           → loads legacy key (v1 compat)
-- `GET  /api/data?sync=`                       → most recent across sync
-- `PUT  /api/data?sync=&weekEnding=&reportId=` body `{businessPurpose, entries}` → `{ok:true}`
-- `DELETE /api/data?sync=&weekEnding=&reportId=` → `{ok:true}`
-- `DELETE /api/data?sync=&weekEnding=`           → deletes legacy key
-- `GET  /api/weeks?sync=` → `{reports: [{weekEnding, reportId, legacy, businessPurpose, updatedAt}, …]}`
-- `POST /api/login`       → signed 14d token (still not enforced anywhere)
+## API
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/api/data?sync=&weekEnding=&reportId=` | → `{data, updatedAt}`. |
+| GET | `/api/data?sync=&weekEnding=` | Loads legacy key (v1). |
+| GET | `/api/data?sync=` | Most recent across whole sync namespace. |
+| PUT | `/api/data?sync=&weekEnding=&reportId=` | Body: `{businessPurpose, entries, clientKnownUpdatedAt?, force?}`. Returns 409 on conflict (unless `force:true`). 200 → `{ok:true, updatedAt}`. |
+| DELETE | `/api/data?sync=&weekEnding=&reportId=` | Delete one report. |
+| DELETE | `/api/data?sync=&weekEnding=` | Delete legacy key. |
+| GET | `/api/weeks?sync=` | → `{reports: [{weekEnding, reportId, legacy, businessPurpose, updatedAt}, …]}`. |
+| POST | `/api/login` | Signed 14d HMAC token. Not enforced anywhere. |
 
 Env vars: `APP_USER`, `APP_PASS`, `TOKEN_SECRET`. KV binding: `EXPENSES_KV`.
 
-## Row catalog (script.js `rows` array)
+---
 
-Columns C–I map to SUN–SAT. Each entry also has a `group` used by the
-mobile day sheet to section the form.
+## OCC / multi-device (added in `60-v2-occ`)
+
+**Problem.** Same report open on two devices. Idle tab has empty/stale
+fields. Its autosave (or `beforeunload` flush) overwrites the other
+tab's real edits — last writer wins, data lost.
+
+**Solution.** Server-enforced timestamp gate on PUT.
+
+- **Server (`functions/api/data.js`).** On PUT, compares the existing
+  record's `updatedAt` to `body.clientKnownUpdatedAt`. If the server is
+  newer (or the client supplied no baseline but a record exists),
+  returns 409 with `{error:'conflict', serverUpdatedAt, data}`. The
+  `force:true` body flag bypasses the check (used by the "Overwrite
+  with mine" button). On success returns `{ok:true, updatedAt}` so the
+  client can update its baseline.
+- **Client (`script.js`).** Two new state vars:
+  - `clientKnownUpdatedAt` — set from server's `updatedAt` on
+    `loadReport()` and after every successful PUT. `null` for brand
+    new reports / new weeks (signals "no baseline; only safe if no
+    record exists").
+  - `conflictPaused` — once a 409 hits, autosave is suspended until
+    the user resolves via the banner. `canAutosave()` checks this.
+  - On 409, `showConflictBanner()` injects a fixed-position red banner
+    at the top with two buttons:
+    - **Reload latest** → calls `loadReport(currentMeta)`, replaces the
+      form with the server's version, drops local edits.
+    - **Overwrite with mine** → re-PUTs with `force:true`, takes the
+      server's new `updatedAt`, autosave resumes.
+- **Baseline lifecycle.** Reset to `null` on `startOver`,
+  `newReportSameWeek`, week change in `onSundayChange`, and after
+  deleting the loaded report. Banner is also removed in those paths.
+- **`beforeunload` flush** sends `clientKnownUpdatedAt` too — a stale
+  unload fire from the idle tab will get 409'd and silently dropped
+  (we can't act on it post-unload, but at least nothing is corrupted).
+- **Slug promotion edge case.** When `currentReportId` is `untitled`
+  and gets promoted to a real slug, the baseline is reset to `null`
+  because the new key is brand-new on the server.
+
+**What this does NOT cover** (intentional):
+- Real-time merge between two simultaneously-edited tabs. We pick a
+  winner and ask the user to reload — same approach as Google Docs
+  offline conflicts. Field-level merge is overkill for this app.
+- Background polling to detect remote changes proactively. Conflicts
+  surface only when this client tries to save.
+
+---
+
+## Row catalog (`script.js` `rows` array, top of file)
+
+Columns C–I map to SUN–SAT. `group` controls the mobile day-sheet
+section.
 
 | Row | Label | Type | Group |
 |-----|-------|------|-------|
-| 8  | From                           | text     | Travel |
-| 9  | To                             | text     | Travel |
-| 10 | Business Miles Driven          | number   | Travel |
-| 29 | Personal Car Mileage ($0.70/mi)| currency (computed = miles × 0.70) | Travel |
-| 42 | Breakfast                      | currency | Meals |
-| 43 | Lunch                          | currency | Meals |
-| 44 | Dinner                         | currency | Meals |
-| 18 | Airfare                        | currency | Travel & Lodging |
-| 19 | Bus, Limo & Taxi               | currency | Travel & Lodging |
-| 20 | Lodging Room & Tax             | currency | Travel & Lodging |
-| 21 | Parking / Tolls                | currency | Travel & Lodging |
-| 22 | Tips                           | currency | Travel & Lodging |
-| 23 | Laundry                        | currency | Travel & Lodging |
-| 25 | Auto Rental                    | currency | Travel & Lodging |
-| 26 | Auto Rental Fuel               | currency | Travel & Lodging |
-| 34 | Internet - Email               | currency | Other |
-| 36 | Postage                        | currency | Other |
-| 38 | Perishable Tools               | currency | Other |
-| 39 | Dues & Subscriptions           | currency | Other |
+| 8  | From                            | text     | Travel |
+| 9  | To                              | text     | Travel |
+| 10 | Business Miles Driven           | number   | Travel |
+| 29 | Personal Car Mileage ($0.70/mi) | currency (computed = miles × 0.70) | Travel |
+| 42 | Breakfast                       | currency | Meals |
+| 43 | Lunch                           | currency | Meals |
+| 44 | Dinner                          | currency | Meals |
+| 18 | Airfare                         | currency | Travel & Lodging |
+| 19 | Bus, Limo & Taxi                | currency | Travel & Lodging |
+| 20 | Lodging Room & Tax              | currency | Travel & Lodging |
+| 21 | Parking / Tolls                 | currency | Travel & Lodging |
+| 22 | Tips                            | currency | Travel & Lodging |
+| 23 | Laundry                         | currency | Travel & Lodging |
+| 25 | Auto Rental                     | currency | Travel & Lodging |
+| 26 | Auto Rental Fuel                | currency | Travel & Lodging |
+| 34 | Internet - Email                | currency | Other |
+| 36 | Postage                         | currency | Other |
+| 38 | Perishable Tools                | currency | Other |
+| 39 | Dues & Subscriptions            | currency | Other |
 
-`MILEAGE_RATE = 0.7` is the only hardcoded rate. Row 29 is auto-computed
-from row 10 and is read-only in the UI. On export, row 29 is NOT written —
-the Excel template computes it from the miles value in row 10.
+`MILEAGE_RATE = 0.7`. Row 29 is auto-computed from row 10, read-only in
+the UI. **Not written on Excel export** — the template's own formula
+computes it from the miles in row 10.
 
-## Autosave behavior
+---
 
-- Trigger: any `input` event on the BP input, any entry field, or any
-  line-item modal edit.
-- Guard: autosave only fires when both Sync Name AND currentWeekEnding
-  are set.
-- Debounce: 800ms after last keystroke.
-- On unload: if there's a pending save, a `keepalive: true` fetch is
-  fired as a best-effort.
-- reportId resolution:
-  - If `currentReportId === ''`, compute from current BP (`computeReportId`).
-  - If `currentReportId === 'untitled'`, try to upgrade once the user
-    types a real BP. Otherwise keep the existing slug stable so we don't
-    accidentally fork the KV key mid-edit. Renames happen via
-    "+ New report (same week)".
+## `script.js` function map
+
+Section headers in code are `// ==================== NAME ====================`.
+Approximate line numbers for navigation:
+
+- `~9`   — `API` constant, route paths.
+- `~49`  — `APP_VERSION` constant.
+- `~52`  — STATE block: `currentSync`, `currentWeekEnding`,
+  `currentReportId`, `reportsCache`, `currentData`, `loading`,
+  `currentEditAddr`, `activeDayIdx`, `autosaveTimer`,
+  `clientKnownUpdatedAt`, `conflictPaused`.
+- `~65`  — `slugifyBP`, `computeReportId`.
+- `~89`  — Line-item helpers: `getLineItems`, `setLineItems`,
+  `addLineItem`, `updateLineItem`, `deleteLineItem`.
+- `~122` — `openLineItemModal`, `updateModalTotal`, `closeLineItemModal`.
+- `~238` — Date utils: `toISODate`, `parseISODate`,
+  `computeWeekEndingFromSunday`, `computeSundayFromWeekEnding`,
+  `fmtMD`, `fmtYYMMDD`, `setHeaderDatesFromSunday`,
+  `safeFilenameBase`.
+- `~297` — `buildTable` builds the desktop input grid.
+- `~379` — `gridKeydown` (arrow-key nav across the grid).
+- `~404` — `onEntryInputChanged` — fires on every input event,
+  triggers totals recompute and `scheduleAutosave()`.
+- `~411` — `dayTotalFromInputs(dayIdx)`.
+- `~430` — `renderMobileDayStrip`.
+- `~482` — `openDaySheet` / `closeDaySheet` / `renderDaySheetBody`.
+- `~627` — `getInputValueForAddr` / `setInputValueForAddr` —
+  mobile↔desktop input sync helpers.
+- `~660` — `clearEntryValues`.
+- `~668` — `startOver`, `newReportSameWeek` (both reset OCC state).
+- `~705` — `recomputeDerived` (row 29 = row 10 × MILEAGE_RATE).
+- `~715` — `updateButtonColors`.
+- `~728` — `computeTotals` — daily + weekly totals; updates pill text.
+- `~762` — `serialize` — produces `{syncName, weekEnding, reportId,
+  businessPurpose, entries}`. Carries `_items` arrays from
+  `currentData`. Autosave wraps this and adds `clientKnownUpdatedAt`.
+- `~792` — `applyData` — clears form, hydrates from data object.
+- `~811` — `apiFetchJson` — wraps `fetch`. **Surfaces `err.status`
+  and `err.body`** so `performAutosave` can detect 409.
+- `~826` — `reportDropdownLabel`, `renderWeeksDropdown`.
+- `~857` — `loadWeeksForSync(autoLoadMostRecent=true)`.
+- `~872` — `loadReport(meta)` — sets `clientKnownUpdatedAt` from
+  response, clears `conflictPaused`.
+- `~901` — `canAutosave` — gate (sync & week & !loading & !conflictPaused).
+- `~904` — `scheduleAutosave` — 800ms debounce.
+- `~910` — `performAutosave` — sends `clientKnownUpdatedAt`, handles
+  409 by setting `conflictPaused` and calling `showConflictBanner`.
+- `~999` — `showConflictBanner` — injects banner with Reload /
+  Overwrite buttons. Self-removing.
+- `~1050` — `deleteCurrentReport` — also resets OCC state on
+  delete-of-loaded.
+- `~1100` — `downloadExcel` — fetches template, splices values into
+  `xl/worksheets/sheet1.xml`, writes via JSZip.
+- `~1271` — Sync name helpers: `sanitizeSyncName`, `renderSync`,
+  `ensureSync`, `changeSync`. Still uses `prompt()`.
+- `~1299` — `setStatus`, `setButtonsEnabled`.
+- `~1315` — `onSundayChange`, `onWeekSelectChange`,
+  `onBusinessPurposeChange`.
+- `~1351` — `init` — wires DOM events, attaches `beforeunload`.
+
+DOM IDs (from `index.html`, accessed via `el(id)`):
+`businessPurpose`, `entryTable`, `sundayDate`, `weekEnding`,
+`weekSelect`, `dateSUN..dateSAT`, `totWEEK`, `lastSaved`,
+`saveStatus`, `syncPill`, `dayStrip`, `mobileWeekTotal`,
+`daySheetOverlay`, `daySheetTitle`, `daySheetDate`, `daySheetTotal`,
+`daySheetBody`, `daySheetPrev`, `daySheetNext`, `daySheetClose`,
+`daySheetDone`, `modalOverlay`, `modalTitle`, `modalItemsList`,
+`modalTotal`, `modalSaveBtn`, `modalCloseBtn`, `btnSave`, `btnClear`,
+`btnDownload`, `btnDeleteWeek`, `btnNewReport`, `btnChangeSync`,
+`conflictBanner` (created dynamically by `showConflictBanner`).
+
+---
 
 ## Mobile ↔ desktop split
 
-- `@media (max-width: 820px)` hides `.desktop-only` and shows `.mobile-only`.
-- The mobile "day strip" reads values straight out of the desktop table's
-  hidden inputs — they're the canonical source of truth.
-- The day sheet's inputs are transient DOM created on open; writing to
-  them syncs back to the matching desktop input by `data-col`/`data-row`.
-- Line-item modal works from both UIs; on close it repaints the day sheet
-  and the day strip.
+- `@media (max-width: 820px)` hides `.desktop-only` and shows
+  `.mobile-only`.
+- The mobile day strip reads values straight out of the desktop
+  table's hidden inputs — those are the **canonical source of truth**.
+- The day sheet's inputs are transient DOM created on open; writing
+  to them syncs back to the matching desktop input by
+  `data-col` / `data-row`.
+- Line-item modal works from both UIs; on close it repaints the day
+  sheet and the day strip.
+
+---
 
 ## Known gotchas / notes to future me
 
 1. `beforeunload` autosave uses `fetch(..., {keepalive:true})`. Limited
    payload size (Chrome: 64KB). Expense data is tiny, fine.
-2. Directly typing into a cell that has line items will **overwrite** them:
-   the day sheet's currency input clears `{addr}_items` when the user types
-   a new number. The main table's `+` button path preserves items. This is
-   deliberate — typing a plain number is a clear signal to replace, not
-   merge.
-3. The sync name `prompt()` still exists. If we want a nicer dialog,
-   bring back a `<dialog>` element wired up properly.
-4. `_auth.js` / `/api/login` exist but remain not enforced on data/weeks.
-   Leaving that call unchanged per v1 behavior — the live site was
-   already running open.
-5. `reportDropdownLabel` appends `[reportId]` suffix only when two reports
-   in the same week share an identical Business Purpose (which should
-   basically never happen, but back-compat + collisions require it).
+2. Directly typing into a cell that has line items will **overwrite**
+   them: the day sheet's currency input clears `{addr}_items` when the
+   user types a new number. The main table's `+` button path preserves
+   items. Deliberate — typing a plain number is a clear "replace" signal.
+3. The sync name still uses native `prompt()`. To replace, bring back a
+   `<dialog>` element wired up properly.
+4. `_auth.js` / `/api/login` exist but remain not enforced on
+   data/weeks. The live site runs open.
+5. `reportDropdownLabel` appends `[reportId]` suffix only when two
+   reports in the same week share an identical Business Purpose
+   (collisions force this).
+6. **Legacy reports + autosave.** A loaded legacy key
+   (`expenses:{sync}:{weekEnding}` with no reportId) gets autosaved to
+   a NEW v2 key on the next edit, because PUT requires reportId. The
+   legacy key is left in place until manually deleted. OCC sees this
+   as a brand-new write (baseline `null`, new key) → no conflict.
+7. **OCC false positives.** Two tabs that both legitimately have the
+   latest version, and both edit at the same time, will conflict —
+   whoever PUTs second gets 409. This is correct behavior; the user is
+   prompted to reload or overwrite. Do NOT auto-merge silently.
+8. **iOS Safari mobile quirks** for date inputs: required
+   `-webkit-appearance` handling and care with flex/overflow on the
+   card containers. Past sessions hit "date input escaping the card";
+   the fix involved input wrapper overflow + appearance resets.
+
+---
 
 ## Where to make future changes
 
@@ -176,5 +310,25 @@ the Excel template computes it from the miles value in row 10.
 - Excel cell mapping → `script.js` → `downloadExcel()`
 - Styling / tokens → `styles.css` → `:root`
 - Autosave timing → `script.js` → `scheduleAutosave()` (800ms debounce)
+- Conflict UI → `script.js` → `showConflictBanner()`
+- OCC server logic → `functions/api/data.js` → PUT branch
 - Mobile breakpoint → `styles.css` → `@media (max-width: 820px)`
 - API shape → `functions/api/*.js`
+
+---
+
+## Working agreements (Yon ↔ Claude)
+
+- Yon communicates terse + direct. Claude makes decisive choices and
+  ships changes rather than asking for ratification on small calls.
+- Short corrections like "no change" / "still broken" mean the fix
+  didn't land — pick a different approach, ask a targeted multiple-
+  choice clarifier if the failure mode is ambiguous.
+- Deliverables ship as a downloadable zip of the full project.
+- iOS Safari is the primary mobile test surface.
+- Largely mechanical refactors are fine for Sonnet-class work; reserve
+  Opus for design/architecture decisions.
+- **REFERENCE.md is the canonical handoff doc.** Claude updates it
+  after material changes so a fresh session can plan from REFERENCE.md
+  alone, without the project zip attached. When Yon asks for a code
+  change, also update this file in the same delivery.
