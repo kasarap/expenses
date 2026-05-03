@@ -36,21 +36,26 @@ Current `APP_VERSION` constant: `60-v2-occ`.
    edits made on another device. See "OCC / multi-device" below.
 
 6. **Template border reconciliation (`Expenses Form.xlsx`).** The
-   original template had 351 column-edge asymmetries — adjacent cells
-   disagreeing on whose border owns the shared edge (e.g. cell X
-   declared a `thin` left edge but its left neighbor had no right
-   edge). When Excel printed to PDF, the renderer sometimes drew the
-   line, sometimes didn't, sometimes drew it at half weight, depending
-   on subpixel alignment per row — producing the random "some borders
-   look bolder than others" effect. Fix: every cell now agrees with
-   its neighbors on shared edges (stronger weight wins; `medium` is
-   preserved for the deliberately-bolded Name/Week/BP/Total boxes).
-   `cellXfs` grew from 104 → 181, `borders` collapsed from 19 → 22
-   canonical tuples, but visually the form is unchanged in Excel — the
-   change is only visible when printing to PDF, where lines now render
-   uniformly. **Do not regenerate this template by hand-editing
-   borders in Excel** without running the reconciliation script (see
-   `tools/` if added later, or re-derive from this REFERENCE entry).
+   original template had **351 column-edge asymmetries** — adjacent
+   cells in the same row disagreeing on whose border owns the shared
+   vertical edge (e.g. cell X declared a `thin` left edge but its
+   left neighbor had no right edge). When Excel printed to PDF, the
+   renderer sometimes drew the line, sometimes didn't, sometimes
+   drew it at half weight, depending on subpixel alignment per row —
+   producing the random "some borders look bolder than others" effect.
+   Fix: **reconcile horizontal (left/right) edges only**. Stronger
+   weight wins on conflict, so deliberate `medium` emphasis on the
+   Name/Week/BP boxes (row 5) is preserved.
+
+   **Important:** do NOT also reconcile top/bottom edges. The original
+   template had 0 row-axis asymmetries, and reconciling them
+   propagated `medium` borders from row 5's heavy boxes down into
+   row 6's day headers, which made specific verticals (under A5/E5/
+   H5/J5) print darker than the rest of the data grid. The current
+   template has 0 horizontal asymmetries and ~35 vertical
+   asymmetries — the vertical ones are the original, intentional
+   pattern (heavy header box bottoms with thin row 6 tops next to
+   them) and they print fine.
 
 ---
 
@@ -320,11 +325,14 @@ DOM IDs (from `index.html`, accessed via `el(id)`):
    the fix involved input wrapper overflow + appearance resets.
 9. **`Expenses Form.xlsx` borders are reconciled — don't break them.**
    The template was fixed (item #6 above) so adjacent cells agree on
-   shared edges. If anyone re-saves the template from Excel after
-   adding/moving cells, the asymmetry is likely to come back. To
-   verify: every cell's right border style should equal its right
-   neighbor's left border style; same for top/bottom. The original
-   template had 351 such mismatches; the current one has 0.
+   shared **horizontal** (left/right) edges. If anyone re-saves the
+   template from Excel after adding/moving cells, the asymmetry is
+   likely to come back. To verify: every cell's right border style
+   should equal its right neighbor's left border style. The original
+   template had 351 such mismatches; the current one has 0. Note that
+   top/bottom mismatches are intentionally preserved (the medium-
+   bordered header boxes have thin neighbors below — this prints
+   fine and reconciling it makes things worse, see item #6).
 
 ---
 
