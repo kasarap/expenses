@@ -35,6 +35,23 @@ Current `APP_VERSION` constant: `60-v2-occ`.
    stale tabs (e.g. phone left open with empty fields) from clobbering
    edits made on another device. See "OCC / multi-device" below.
 
+6. **Template border reconciliation (`Expenses Form.xlsx`).** The
+   original template had 351 column-edge asymmetries — adjacent cells
+   disagreeing on whose border owns the shared edge (e.g. cell X
+   declared a `thin` left edge but its left neighbor had no right
+   edge). When Excel printed to PDF, the renderer sometimes drew the
+   line, sometimes didn't, sometimes drew it at half weight, depending
+   on subpixel alignment per row — producing the random "some borders
+   look bolder than others" effect. Fix: every cell now agrees with
+   its neighbors on shared edges (stronger weight wins; `medium` is
+   preserved for the deliberately-bolded Name/Week/BP/Total boxes).
+   `cellXfs` grew from 104 → 181, `borders` collapsed from 19 → 22
+   canonical tuples, but visually the form is unchanged in Excel — the
+   change is only visible when printing to PDF, where lines now render
+   uniformly. **Do not regenerate this template by hand-editing
+   borders in Excel** without running the reconciliation script (see
+   `tools/` if added later, or re-derive from this REFERENCE entry).
+
 ---
 
 ## File layout
@@ -301,6 +318,13 @@ DOM IDs (from `index.html`, accessed via `el(id)`):
    `-webkit-appearance` handling and care with flex/overflow on the
    card containers. Past sessions hit "date input escaping the card";
    the fix involved input wrapper overflow + appearance resets.
+9. **`Expenses Form.xlsx` borders are reconciled — don't break them.**
+   The template was fixed (item #6 above) so adjacent cells agree on
+   shared edges. If anyone re-saves the template from Excel after
+   adding/moving cells, the asymmetry is likely to come back. To
+   verify: every cell's right border style should equal its right
+   neighbor's left border style; same for top/bottom. The original
+   template had 351 such mismatches; the current one has 0.
 
 ---
 
