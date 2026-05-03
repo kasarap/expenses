@@ -5,7 +5,7 @@ handoff document — Claude should be able to plan changes from this file
 alone, without the zip attached.
 
 Deployed target: `https://exp.jonmercado.com/` (Cloudflare Pages + KV).
-Current `APP_VERSION` constant: `61-print-scale`.
+Current `APP_VERSION` constant: `60-v2-occ`.
 
 ---
 
@@ -34,27 +34,6 @@ Current `APP_VERSION` constant: `61-print-scale`.
 5. **Optimistic concurrency control (OCC) — `60-v2-occ`.** Prevents
    stale tabs (e.g. phone left open with empty fields) from clobbering
    edits made on another device. See "OCC / multi-device" below.
-
-6. **Print scale lock (`61-print-scale`).** The user reported that
-   PDFs produced by Excel→Print→Save as PDF had random vertical
-   borders rendering darker/thicker than others. After investigation,
-   the root cause was NOT borders themselves (early sessions
-   incorrectly tried to "reconcile border asymmetries" — those changes
-   were reverted; the template is byte-identical to the older clean
-   version). The actual cause: the template ships with
-   `<pageSetUpPr fitToPage="1"/>` and `<pageSetup scale="60"/>`. When
-   Excel opens a generated xlsx with filled-in data, it RECOMPUTES
-   the print scale to fit the content (defaulting to 1×1 page), and
-   lands on a value like 56–58. That non-integer scale puts cell
-   borders on fractional pixel positions during the print-to-PDF
-   render — some rows round to 1px, others to 2px — producing the
-   random "some borders look bolder" effect.
-
-   **Fix:** in `downloadExcel()`, before serializing, call
-   `lockPrintScale()` to set `fitToPage="0"` on `<pageSetUpPr>` and
-   force `scale="60"` on `<pageSetup>` (and strip `fitToWidth`/
-   `fitToHeight`). Excel no longer recomputes the scale on open, and
-   prints land on the same pixel grid the older clean output used.
 
 ---
 
@@ -322,16 +301,27 @@ DOM IDs (from `index.html`, accessed via `el(id)`):
    `-webkit-appearance` handling and care with flex/overflow on the
    card containers. Past sessions hit "date input escaping the card";
    the fix involved input wrapper overflow + appearance resets.
-9. **Print scale lock — don't break it.** The fix in item #6 above
-   lives in `downloadExcel()` as `lockPrintScale()`. It explicitly
-   sets `fitToPage="0"` and `scale="60"` on the generated xlsx so
-   Excel doesn't auto-shrink to fit content (which causes uneven
-   border rendering when printing to PDF). The template
-   `Expenses Form.xlsx` itself is unmodified — the older clean print
-   came from this same template. Don't "fix" the template's borders
-   thinking that's the issue; the borders are fine. Don't remove
-   `lockPrintScale()` either, or the bug returns the next time
-   anyone prints a populated form.
+9. **Open issue: uneven vertical borders when printing populated
+   forms to PDF.** Yon reports random vertical lines rendering bolder
+   than others when doing Excel → File → Print → Save as PDF. The
+   issue does NOT appear in Excel's on-screen view, only in the
+   printed PDF. Two unsuccessful attempts so far:
+   - **Border XML reconciliation** (reverted): tried fixing 351
+     "asymmetries" between adjacent cells' shared edges. Made no
+     visible difference at best, made things worse when top/bottom
+     edges were also reconciled (medium borders from row 5 boxes
+     propagated down into row 6 day headers).
+   - **Print scale lock** (reverted, `61-print-scale`): forced
+     `scale=60` and `fitToPage=0` on the generated xlsx. This cropped
+     content off the bottom of the printout AND did not fix the
+     unevenness, so it was reverted.
+   The template (`Expenses Form.xlsx`) is byte-identical to a version
+   that previously printed cleanly per Yon, so the cause is likely
+   something Excel changes between save-and-reopen, or an environment
+   factor. **Next attempt should start from a known-clean reference
+   xlsx** (Yon to provide) and diff the printed PDFs / underlying
+   XML pixel-by-pixel before theorizing. Do not repeat either of the
+   above approaches.
 
 ---
 

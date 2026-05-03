@@ -46,7 +46,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '61-print-scale';
+const APP_VERSION = '60-v2-occ';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
@@ -1247,31 +1247,6 @@ async function downloadExcel(){
     });
 
     forceWorkbookRecalc();
-
-    // Lock the print scale to a fixed value and disable fit-to-page.
-    // Why: the template ships with <pageSetUpPr fitToPage="1"/> and a default
-    // scale of 60. When Excel opens a generated file, it RECOMPUTES the scale
-    // to fit content (defaulting to 1x1 page). With a filled-in form the
-    // recomputed scale lands somewhere like 56–58, which puts cell borders
-    // on fractional pixel positions during print-to-PDF — different rows
-    // round differently → some borders look bolder than others (the random
-    // unevenness Yon hit). Forcing scale=60 + fitToPage=0 makes the print
-    // pipeline produce uniform borders, matching the older clean output.
-    function lockPrintScale(){
-      // <sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>  →  fitToPage="0"
-      const setUpPr = sheetDoc.getElementsByTagName('pageSetUpPr')[0];
-      if (setUpPr) setUpPr.setAttribute('fitToPage','0');
-
-      // <pageSetup .../> → ensure scale="60", strip fitToWidth/fitToHeight
-      // so Excel doesn't try to override.
-      const pageSetup = sheetDoc.getElementsByTagName('pageSetup')[0];
-      if (pageSetup){
-        pageSetup.setAttribute('scale','60');
-        pageSetup.removeAttribute('fitToWidth');
-        pageSetup.removeAttribute('fitToHeight');
-      }
-    }
-    lockPrintScale();
 
     zip.file(sheetPath, new XMLSerializer().serializeToString(sheetDoc));
     zip.file(workbookPath, new XMLSerializer().serializeToString(workbookDoc));
