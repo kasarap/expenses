@@ -46,7 +46,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '62-payment-tracker';
+const APP_VERSION = '63-tracker-fixes';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
@@ -1558,7 +1558,7 @@ async function renderTracker(){
     tr.dataset.rkey = rKey;
     tr.innerHTML = `
       <td class="tr-name-cell">${escHtml(label)}</td>
-      <td class="tr-total-cell">$${total.toFixed(2)}</td>
+      <td class="tr-total-cell">$${total.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
       <td class="tr-date-cell"><input type="date" class="tracker-sent" value="${escHtml(td.sent||'')}" aria-label="Sent date for ${escHtml(label)}"></td>
       <td class="tr-date-cell"><input type="date" class="tracker-paid" value="${escHtml(td.paid||'')}" aria-label="Paid date for ${escHtml(label)}"></td>
     `;
@@ -1599,15 +1599,19 @@ function saveTrackerDate(rKey, field, value){
 
 function renderTrackerSummary(oweTotal, spentTotal, trackerData){
   const prevYearKey = `__prevYear__${new Date().getFullYear()-1}`;
-  const prevVal = trackerData[prevYearKey] || '';
+  const prevVal = trackerData[prevYearKey] !== undefined ? trackerData[prevYearKey] : '41307.52';
+  if (trackerData[prevYearKey] === undefined){
+    trackerData[prevYearKey] = '41307.52';
+    saveTrackerData(trackerData);
+  }
   el('trackerSummary').innerHTML = `
     <div class="tracker-sum-row sum-owe">
       <span class="tracker-sum-label">Owe (sent, not yet paid)</span>
-      <span class="tracker-sum-value">$${oweTotal.toFixed(2)}</span>
+      <span class="tracker-sum-value">$${oweTotal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
     </div>
     <div class="tracker-sum-row sum-spent">
       <span class="tracker-sum-label">Spent ${new Date().getFullYear()}</span>
-      <span class="tracker-sum-value">$${spentTotal.toFixed(2)}</span>
+      <span class="tracker-sum-value">$${spentTotal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
     </div>
     <div class="tracker-sum-row">
       <span class="tracker-sum-label tracker-sum-prev-year">
@@ -1635,7 +1639,7 @@ function recalcSummary(){
     const rKey = tr.dataset.rkey;
     const sentVal = tr.querySelector('.tracker-sent').value;
     const paidVal = tr.querySelector('.tracker-paid').value;
-    const total = parseFloat((tr.querySelector('.tr-total-cell')||{}).textContent?.replace('$','')) || 0;
+    const total = parseFloat((tr.querySelector('.tr-total-cell')||{}).textContent?.replace(/[$,]/g,'')) || 0;
     // Determine year from rKey
     const weekEnding = rKey.startsWith('legacy:') ? rKey.slice(7) : rKey.split(':')[0];
     const reportYear = parseInt((weekEnding||'').slice(0,4), 10);
