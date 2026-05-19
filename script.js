@@ -46,7 +46,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '64-meal-tracker';
+const APP_VERSION = '65-meal-calendar';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
@@ -1376,6 +1376,26 @@ async function init(){
   el('tabBtn3').addEventListener('click', ()=> switchTab(3));
   el('btnCopyUnpaid').addEventListener('click', copyUnpaidReports);
   el('btnAddMealWeek').addEventListener('click', addMealWeek);
+  el('mealPickerClose').addEventListener('click', closeMealPicker);
+  el('mealPickerPrev').addEventListener('click', ()=>{
+    mealPickerMonth--; if(mealPickerMonth<0){mealPickerMonth=11;mealPickerYear--;}
+    renderMealPicker();
+  });
+  el('mealPickerNext').addEventListener('click', ()=>{
+    mealPickerMonth++; if(mealPickerMonth>11){mealPickerMonth=0;mealPickerYear++;}
+    renderMealPicker();
+  });
+  el('mealCalPrev').addEventListener('click', ()=>{
+    mealCalMonth--; if(mealCalMonth<0){mealCalMonth=11;mealCalYear--;}
+    renderMealCalendar();
+  });
+  el('mealCalNext').addEventListener('click', ()=>{
+    mealCalMonth++; if(mealCalMonth>11){mealCalMonth=0;mealCalYear++;}
+    renderMealCalendar();
+  });
+  el('mealPickerOverlay').addEventListener('click', function(e){
+    if(e.target===this) closeMealPicker();
+  });
 
   // Line-item modal
   el('modalCloseBtn').addEventListener('click', closeLineItemModal);
@@ -1873,6 +1893,7 @@ function renderMealTracker(){
     d2[prevKey] = this.value;
     saveMealData(d2);
   });
+  renderMealCalendar();
 }
 
 // Expand a week into a detail grid (7 days × 3 categories)
@@ -2007,32 +2028,179 @@ function renderMealSummaryOnly(){
   });
 }
 
-function addMealWeek(){
-  // Prompt for Sunday date, defaulting to the most recent Sunday
-  const today = new Date();
-  const dayOfWeek = today.getDay(); // 0=Sun
-  const sun = new Date(today); sun.setDate(today.getDate() - dayOfWeek);
-  const defaultSun = toISODate(sun);
+// ==================== MEAL CALENDAR PICKER ====================
 
-  const input = prompt('Enter Sunday date for the new week (YYYY-MM-DD):', defaultSun);
-  if (!input) return;
-  // Validate
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.trim())){
-    alert('Invalid date format. Use YYYY-MM-DD.');
-    return;
-  }
-  const sundayISO = input.trim();
+let mealPickerYear = new Date().getFullYear();
+let mealPickerMonth = new Date().getMonth(); // 0-based
+
+let mealCalYear = new Date().getFullYear();
+let mealCalMonth = new Date().getMonth();
+
+const MONTH_NAMES = ['January','February','March','April','May','June',
+  'July','August','September','October','November','December'];
+const DOW_LABELS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+function addMealWeek(){
+  mealPickerYear = new Date().getFullYear();
+  mealPickerMonth = new Date().getMonth();
+  renderMealPicker();
+  const ov = el('mealPickerOverlay');
+  ov.style.display = 'flex';
+}
+
+function closeMealPicker(){
+  el('mealPickerOverlay').style.display = 'none';
+}
+
+function renderMealPicker(){
+  el('mealPickerTitle').textContent = `${MONTH_NAMES[mealPickerMonth]} ${mealPickerYear}`;
+  const grid = el('mealPickerGrid');
   const data = loadMealData();
-  // Check for duplicate
-  if (data.weeks.find(w=>w.sundayISO===sundayISO)){
-    alert('That week already exists.');
-    return;
+  const existingSundays = new Set(data.weeks.map(w => w.sundayISO));
+
+  // Build calendar grid
+  const firstDay = new Date(mealPickerYear, mealPickerMonth, 1);
+  const startOffset = firstDay.getDay(); // 0=Sun, so Sun weeks start on col 0
+  const daysInMonth = new Date(mealPickerYear, mealPickerMonth+1, 0).getDate();
+
+  let html = '<div class="mpc-grid">';
+  // DOW headers
+  DOW_LABELS.forEach(d => { html += `<div class="mpc-dow">${d}</div>`; });
+
+  // Blank cells before first day
+  for (let i = 0; i < startOffset; i++) html += '<div class="mpc-cell mpc-blank"></div>';
+
+  for (let d = 1; d <= daysInMonth; d++){
+    const date = new Date(mealPickerYear, mealPickerMonth, d);
+    const dow = date.getDay();
+    const iso = toISODate(date);
+    const isSunday = dow === 0;
+    const exists = existingSundays.has(iso);
+    const isToday = iso === toISODate(new Date());
+
+    let cls = 'mpc-cell';
+    if (isSunday) cls += ' mpc-sunday';
+    if (exists) cls += ' mpc-exists';
+    if (isToday) cls += ' mpc-today';
+
+    const clickAttr = isSunday && !exists
+      ? `onclick="mealPickerSelectSunday('${iso}')" style="cursor:pointer"`
+      : '';
+
+    const title = isSunday
+      ? (exists ? 'Week already added' : 'Click to add this week')
+      : '';
+
+    html += `<div class="${cls}" ${clickAttr} title="${title}">${d}</div>`;
+  }
+  html += '</div>';
+  grid.innerHTML = html;
+}
+
+function mealPickerSelectSunday(sundayISO){
+  const data = loadMealData();
+  if (data.weeks.find(w => w.sundayISO === sundayISO)){
+    return; // already exists
   }
   const id = `mw_${Date.now()}`;
-  const days = Array.from({length:7},()=>({breakfast:undefined,lunch:undefined,dinner:undefined}));
-  data.weeks.unshift({ id, sundayISO, days, paid:'' });
-  // Sort newest first
-  data.weeks.sort((a,b)=>b.sundayISO.localeCompare(a.sundayISO));
+  const days = Array.from({length:7}, ()=>({breakfast:undefined,lunch:undefined,dinner:undefined}));
+  data.weeks.push({ id, sundayISO, days, paid:'' });
+  data.weeks.sort((a,b) => b.sundayISO.localeCompare(a.sundayISO));
   saveMealData(data);
+  closeMealPicker();
   renderMealTracker();
+  renderMealCalendar();
+}
+
+// ==================== MEAL CALENDAR OVERVIEW ====================
+
+function renderMealCalendar(){
+  const titleEl = el('mealCalTitle');
+  if (!titleEl) return;
+  titleEl.textContent = `${MONTH_NAMES[mealCalMonth]} ${mealCalYear}`;
+
+  const data = loadMealData();
+
+  // Build a map of date→{total, paid, wid} for fast lookup
+  const dateMap = {}; // iso → {total, paid, cats}
+  const weekMap = {}; // sundayISO → {paid, total}
+  for (const week of data.weeks){
+    const sun = parseISODate(week.sundayISO);
+    const wTotal = mealWeekTotal(week.days);
+    weekMap[week.sundayISO] = { paid: !!week.paid, total: wTotal };
+    week.days.forEach((day, di) => {
+      const d = new Date(sun); d.setDate(d.getDate() + di);
+      const iso = toISODate(d);
+      const dayTotal = MEAL_CATS.reduce((s,c) => s+(Number(day[c])||0), 0);
+      if (dayTotal > 0) dateMap[iso] = { total: dayTotal, paid: !!week.paid, sundayISO: week.sundayISO };
+    });
+  }
+
+  const firstDay = new Date(mealCalYear, mealCalMonth, 1);
+  const startOffset = firstDay.getDay();
+  const daysInMonth = new Date(mealCalYear, mealCalMonth+1, 0).getDate();
+
+  // Figure out which Sundays appear in this month view
+  // We need to shade whole week rows
+  // Build set of all ISO dates in view and their week membership
+  const todayISO = toISODate(new Date());
+
+  let html = '<div class="mcc-grid">';
+  DOW_LABELS.forEach(d => { html += `<div class="mcc-dow">${d}</div>`; });
+
+  // blank leading cells
+  for (let i = 0; i < startOffset; i++) html += '<div class="mcc-cell mcc-blank"></div>';
+
+  for (let d = 1; d <= daysInMonth; d++){
+    const date = new Date(mealCalYear, mealCalMonth, d);
+    const iso = toISODate(date);
+    const dow = date.getDay();
+
+    // Find which week this date belongs to (walk back to Sunday)
+    const sun = new Date(date); sun.setDate(sun.getDate() - dow);
+    const sunISO = toISODate(sun);
+    const weekInfo = weekMap[sunISO];
+
+    const entry = dateMap[iso];
+    const isToday = iso === todayISO;
+
+    let bg = '';
+    if (weekInfo){
+      bg = weekInfo.paid
+        ? 'background:rgba(0,200,120,.12);'
+        : 'background:rgba(255,200,0,.08);';
+    }
+
+    let amtHtml = '';
+    if (entry && entry.total > 0){
+      amtHtml = `<span class="mcc-amt${entry.paid?' mcc-paid':''}">${fmtMoney(entry.total)}</span>`;
+    }
+
+    const todayCls = isToday ? ' mcc-today' : '';
+    const sunCls = dow === 0 ? ' mcc-sunday-col' : '';
+    const hasCls = entry ? ' mcc-has-entry' : '';
+
+    html += `<div class="mcc-cell${todayCls}${sunCls}${hasCls}" style="${bg}">
+      <span class="mcc-day-num">${d}</span>
+      ${amtHtml}
+    </div>`;
+  }
+  html += '</div>';
+  el('mealCalGrid').innerHTML = html;
+
+  // Month totals below calendar
+  let monthSpent = 0, monthOwe = 0;
+  Object.entries(dateMap).forEach(([iso, info]) => {
+    if (iso.startsWith(`${mealCalYear}-${String(mealCalMonth+1).padStart(2,'0')}`)){
+      monthSpent += info.total;
+      if (!info.paid) monthOwe += info.total;
+    }
+  });
+
+  el('mealCalTotals').innerHTML = `
+    <div style="display:flex;gap:20px;padding:10px 4px 2px;font-size:13px;flex-wrap:wrap;">
+      <span style="color:var(--muted);">Month total: <strong style="color:var(--text);">${fmtMoney(monthSpent)||'$0.00'}</strong></span>
+      <span style="color:var(--muted);">Unpaid this month: <strong style="color:var(--danger);">${fmtMoney(monthOwe)||'$0.00'}</strong></span>
+    </div>
+  `;
 }
