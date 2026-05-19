@@ -759,3 +759,22 @@ th.tr-act, .tracker-table td.tr-act-cell { width: 36px; text-align: center; }
 
 .mwc-chevron { font-size: 11px; opacity: .7; margin-right: 5px; display: inline-block; transition: transform .12s; }
 .mwc-header:hover { background: rgba(255,255,255,.05); }
+
+/* Payment divider — paid/unpaid labels */
+.meal-payment-divider {
+  display: flex !important;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.meal-pmt-left, .meal-pmt-right {
+  display: flex; align-items: center; gap: 8px;
+}
+.meal-pmt-badge {
+  font-size: 10px; font-weight: 800; letter-spacing: .07em;
+  padding: 2px 7px; border-radius: 4px;
+}
+.paid-badge { background: rgba(0,200,120,.25); color: rgba(0,200,120,1); }
+.unpaid-badge { background: rgba(255,200,0,.2); color: rgba(255,200,0,.9); }
+.meal-pmt-text { font-size: 13px; font-weight: 600; color: rgba(0,200,120,.9); }

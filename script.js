@@ -46,7 +46,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '70-meal-owe-complete-weeks';
+const APP_VERSION = '72-tracker-and-meal-fixes';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
@@ -1552,14 +1552,11 @@ async function renderTracker(){
     const isPaid = !!td.paid;
     const isSent = !!td.sent;
 
-    // Spent = any report for the current year
     const reportYear = parseInt((r.weekEnding || '').slice(0,4), 10);
     if (reportYear === currentYear) spentTotal += total;
 
     // Owe = sent but not paid
     if (isSent && !isPaid) oweTotal += total;
-    // Total unpaid = not paid at all (includes unsent)
-    if (!isPaid) unpaidTotal += total;
 
     const tr = document.createElement('tr');
     tr.className = isPaid ? 'tr-paid' : '';
@@ -1782,8 +1779,8 @@ function computeMealOwe(data){
     const sat = new Date(sun); sat.setDate(sat.getDate()+6);
     const satISO = toISODate(sat);
 
-    // Only count if the week is fully done (Saturday has passed) AND started after last payment
-    if (satISO < todayISO && (!cutoff || week.sundayISO > cutoff)){
+    // Only count if the week is fully done (Saturday has passed or is today) AND started after last payment
+    if (satISO <= todayISO && (!cutoff || week.sundayISO > cutoff)){
       owe += mealWeekTotal(week);
     }
   }
@@ -1802,8 +1799,9 @@ function renderMealTracker(){
   const data = loadMealData();
   body.innerHTML = '';
 
-  const weeks = [...data.weeks].sort((a,b)=>b.sundayISO.localeCompare(a.sundayISO));
-  const payments = [...data.payments].sort((a,b)=>b.date.localeCompare(a.date));
+  // Oldest first
+  const weeks = [...data.weeks].sort((a,b)=>a.sundayISO.localeCompare(b.sundayISO));
+  const payments = [...data.payments].sort((a,b)=>a.date.localeCompare(b.date));
 
   if (!weeks.length && !payments.length){
     body.innerHTML = '<p class="tr-empty" style="text-align:center;padding:24px 0;color:var(--muted);">No weeks yet — click + Add Week.</p>';
@@ -1811,34 +1809,33 @@ function renderMealTracker(){
     return;
   }
 
-  // interleave weeks and payment dividers chronologically (newest first)
-  // Payment covers all weeks with sundayISO <= pmt.date
-  // Divider appears between the last uncovered week (sundayISO > pmt.date) and first covered week (sundayISO <= pmt.date)
+  // Build a merged timeline of weeks and payments, oldest first.
+  // A payment covers weeks where sundayISO <= pmt.date (week starting on payment date goes to NEXT cycle).
+  // Weeks after the payment are "unpaid/new cycle".
+  // Display: paid weeks first (oldest), then payment divider, then next batch, etc.
+
   const pmtUsed = new Set();
 
   for (let i = 0; i < weeks.length; i++){
     const week = weeks[i];
-    const nextWeek = weeks[i+1];
+    const prevWeek = weeks[i-1];
 
-    body.appendChild(makeMealWeekCard(week, data));
-
-    // After appending this week, check if any payment falls between this week's Sunday and the next week's Sunday
-    // i.e. nextWeek.sundayISO < pmt.date <= week.sundayISO  → but since display is newest-first,
-    // payment goes here if this week is the LAST week covered (week.sundayISO >= pmt.date and (!nextWeek || nextWeek.sundayISO > pmt.date) is wrong)
-    // Simpler: payment divider goes between week[i] and week[i+1] when pmt.date is >= nextWeek.sundayISO and < week.sundayISO
-    // i.e. nextWeek is the first covered week, week[i] is the first uncovered week
+    // Before this week, insert any payment whose date is >= prevWeek.sundayISO and < week.sundayISO
+    // i.e. payment falls in the gap between the previous week and this week
     for (const pmt of payments){
       if (pmtUsed.has(pmt.id)) continue;
-      const thisUncovered = week.sundayISO > pmt.date;
-      const nextCovered = !nextWeek || nextWeek.sundayISO <= pmt.date;
-      if (thisUncovered && nextCovered){
+      const afterPrev = !prevWeek || pmt.date >= prevWeek.sundayISO;
+      const beforeThis = pmt.date < week.sundayISO;
+      if (afterPrev && beforeThis){
         pmtUsed.add(pmt.id);
         body.appendChild(makeMealPaymentDiv(pmt));
       }
     }
+
+    body.appendChild(makeMealWeekCard(week, data));
   }
 
-  // Remaining payments older than all weeks
+  // Payments newer than all weeks
   for (const pmt of payments){
     if (!pmtUsed.has(pmt.id)){
       body.appendChild(makeMealPaymentDiv(pmt));
@@ -1976,8 +1973,14 @@ function makeMealPaymentDiv(pmt){
   div.className = 'meal-payment-divider';
   const dateDisp = formatISODateForDisplay(pmt.date);
   div.innerHTML = `
-    <span>✓ Paid ${dateDisp} — ${fmtMoney(pmt.amount)}</span>
-    <button class="meal-del-btn" type="button" title="Remove payment">✕</button>`;
+    <div class="meal-pmt-left">
+      <span class="meal-pmt-badge paid-badge">PAID</span>
+      <span class="meal-pmt-text">✓ ${dateDisp} — ${fmtMoney(pmt.amount)}</span>
+    </div>
+    <div class="meal-pmt-right">
+      <span class="meal-pmt-badge unpaid-badge">UNPAID ↑</span>
+      <button class="meal-del-btn" type="button" title="Remove payment">✕</button>
+    </div>`;
   div.querySelector('.meal-del-btn').addEventListener('click',function(){
     if(!confirm('Remove this payment record?')) return;
     const d2=loadMealData();
@@ -2042,6 +2045,28 @@ function renderMealSummary(data){
     d2.payments.push({id:`mp_${Date.now()}`,date:dateVal,amount:amtVal});
     saveMealData(d2);
     renderMealTracker();
+  });
+
+  el('mealPayDate').addEventListener('change', function(){
+    const pickedDate = this.value;
+    if (!pickedDate) return;
+    const d2 = loadMealData();
+    // Find last payment strictly before this date
+    const priorPayments = d2.payments
+      .filter(p => p.date < pickedDate)
+      .sort((a,b) => a.date.localeCompare(b.date));
+    const cutoff = priorPayments.length ? priorPayments[priorPayments.length-1].date : null;
+    // Sum weeks: Saturday < pickedDate AND sundayISO > cutoff
+    let owe = 0;
+    for (const week of d2.weeks){
+      const sun = parseISODate(week.sundayISO);
+      const sat = new Date(sun); sat.setDate(sat.getDate()+6);
+      const satISO = toISODate(sat);
+      if (satISO < pickedDate && (!cutoff || week.sundayISO > cutoff)){
+        owe += mealWeekTotal(week);
+      }
+    }
+    el('mealPayAmt').value = roundUpTo5(owe) || '';
   });
   el('mealPrevYearInput').addEventListener('change',function(){
     const d2=loadMealData();
