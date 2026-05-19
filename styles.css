@@ -667,3 +667,22 @@ th.tr-act, .tracker-table td.tr-act-cell { width: 36px; text-align: center; }
   .mcc-amt { font-size:10px; }
   .mpc-cell { font-size:12px; }
 }
+
+/* Meal tracker inline inputs */
+.meal-inline-input {
+  width: 80px; padding: 5px 8px; border-radius: 7px;
+  border: 1px solid var(--line); background: var(--input-bg); color: var(--text);
+  font-size: 14px; text-align: right; font-variant-numeric: tabular-nums;
+  -moz-appearance: textfield;
+}
+.meal-inline-input::-webkit-outer-spin-button,
+.meal-inline-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.meal-inline-input:focus { border-color: var(--accent); outline: none; }
+.meal-inline-input::placeholder { color: var(--muted); opacity: .5; }
+
+/* Payment divider row */
+.meal-payment-divider td { background: rgba(0,200,120,.08) !important; }
+.meal-pmt-cell {
+  font-size: 13px; font-weight: 600; color: rgba(0,200,120,.9);
+  padding: 10px 12px !important; letter-spacing: .01em;
+}

@@ -46,7 +46,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '65-meal-calendar';
+const APP_VERSION = '66-meal-simplified';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
@@ -1377,25 +1377,9 @@ async function init(){
   el('btnCopyUnpaid').addEventListener('click', copyUnpaidReports);
   el('btnAddMealWeek').addEventListener('click', addMealWeek);
   el('mealPickerClose').addEventListener('click', closeMealPicker);
-  el('mealPickerPrev').addEventListener('click', ()=>{
-    mealPickerMonth--; if(mealPickerMonth<0){mealPickerMonth=11;mealPickerYear--;}
-    renderMealPicker();
-  });
-  el('mealPickerNext').addEventListener('click', ()=>{
-    mealPickerMonth++; if(mealPickerMonth>11){mealPickerMonth=0;mealPickerYear++;}
-    renderMealPicker();
-  });
-  el('mealCalPrev').addEventListener('click', ()=>{
-    mealCalMonth--; if(mealCalMonth<0){mealCalMonth=11;mealCalYear--;}
-    renderMealCalendar();
-  });
-  el('mealCalNext').addEventListener('click', ()=>{
-    mealCalMonth++; if(mealCalMonth>11){mealCalMonth=0;mealCalYear++;}
-    renderMealCalendar();
-  });
-  el('mealPickerOverlay').addEventListener('click', function(e){
-    if(e.target===this) closeMealPicker();
-  });
+  el('mealPickerPrev').addEventListener('click', ()=>{ mealPickerMonth--; if(mealPickerMonth<0){mealPickerMonth=11;mealPickerYear--;} renderMealPicker(); });
+  el('mealPickerNext').addEventListener('click', ()=>{ mealPickerMonth++; if(mealPickerMonth>11){mealPickerMonth=0;mealPickerYear++;} renderMealPicker(); });
+  el('mealPickerOverlay').addEventListener('click', function(e){ if(e.target===this) closeMealPicker(); });
 
   // Line-item modal
   el('modalCloseBtn').addEventListener('click', closeLineItemModal);
@@ -1736,291 +1720,255 @@ function switchTab(n){
 }
 
 // ==================== MEAL TRACKER (Tab 3) ====================
-// Data shape stored in localStorage under key `meal_tracker:{sync}`:
-// { weeks: [ { id, sundayISO, days: [{breakfast,lunch,dinner}, x7], paid } ] }
-// sundayISO = YYYY-MM-DD of the Sunday starting that week.
+// Data shape: { weeks: [{id, sundayISO, breakfast, lunch, dinner}], payments: [{id, date, amount}] }
+// - No per-week paid flag. Instead, payments[] log covers all owed up to that date.
+// - Owe = sum of weeks added after the last payment (rounded up to nearest $5).
+// - Spent = all weeks in current year.
 
 const MEAL_CATS = ['breakfast','lunch','dinner'];
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const DOW_LABELS_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
-function mealStorageKey(){
-  return `meal_tracker:${currentSync||'__local__'}`;
-}
+function mealStorageKey(){ return `meal_tracker:${currentSync||'__local__'}`; }
 
 function loadMealData(){
-  try{
+  try {
     const raw = localStorage.getItem(mealStorageKey());
     const d = raw ? JSON.parse(raw) : {};
     if (!Array.isArray(d.weeks)) d.weeks = [];
+    if (!Array.isArray(d.payments)) d.payments = [];
     return d;
-  } catch { return {weeks:[]}; }
+  } catch { return {weeks:[], payments:[]}; }
 }
 
-function saveMealData(data){
-  localStorage.setItem(mealStorageKey(), JSON.stringify(data));
-}
+function saveMealData(data){ localStorage.setItem(mealStorageKey(), JSON.stringify(data)); }
 
 function mealWeekLabel(sundayISO){
-  // "Week M-D through M-D" using Sunday and the following Saturday
   const sun = parseISODate(sundayISO);
   const sat = new Date(sun); sat.setDate(sat.getDate()+6);
   const fmt = d => `${d.getMonth()+1}-${d.getDate()}`;
   return `Week ${fmt(sun)} through ${fmt(sat)}`;
 }
 
-function mealDayLabel(sundayISO, dayIdx){
-  // Full date label for a day column header: "Sun M/D"
-  const sun = parseISODate(sundayISO);
-  const d = new Date(sun); d.setDate(d.getDate()+dayIdx);
-  const dows = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  return `${dows[dayIdx]}<br><span style="font-size:10px;opacity:.7">${d.getMonth()+1}/${d.getDate()}</span>`;
-}
-
-function mealCatTotal(days, cat){
-  return days.reduce((s,d)=> s + (Number(d[cat])||0), 0);
-}
-
-function mealWeekTotal(days){
-  return MEAL_CATS.reduce((s,cat)=> s + mealCatTotal(days,cat), 0);
+function mealWeekTotal(week){
+  return (Number(week.breakfast)||0) + (Number(week.lunch)||0) + (Number(week.dinner)||0);
 }
 
 function fmtMoney(n){
-  if (!n) return '';
-  return '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  if (!n && n !== 0) return '';
+  return '$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+
+function roundUpTo5(n){ return Math.ceil(n / 5) * 5; }
+
+// Compute current owe = weeks added after the last payment date (or all if no payments)
+function computeMealOwe(data){
+  const payments = [...data.payments].sort((a,b)=>a.date.localeCompare(b.date));
+  const lastPayment = payments.length ? payments[payments.length-1] : null;
+  const cutoff = lastPayment ? lastPayment.date : null; // ISO date string
+
+  let owe = 0;
+  for (const week of data.weeks){
+    // A week "counts" if its Sunday is after the cutoff date
+    if (!cutoff || week.sundayISO > cutoff){
+      owe += mealWeekTotal(week);
+    }
+  }
+  return owe;
+}
+
+function computeMealSpent(data){
+  const year = new Date().getFullYear();
+  return data.weeks
+    .filter(w => parseInt(w.sundayISO.slice(0,4)) === year)
+    .reduce((s,w) => s + mealWeekTotal(w), 0);
 }
 
 function renderMealTracker(){
   const body = el('mealBody');
   const summary = el('mealSummary');
   const data = loadMealData();
-  const weeks = data.weeks;
-
-  if (!weeks.length){
-    body.innerHTML = '<tr><td colspan="7" class="tr-empty">No weeks yet — click + Add Week.</td></tr>';
-    summary.innerHTML = '';
-    return;
-  }
 
   body.innerHTML = '';
 
-  let oweTotal = 0;
-  let spentTotal = 0;
-  const currentYear = new Date().getFullYear();
+  if (!data.weeks.length && !data.payments.length){
+    body.innerHTML = '<tr><td colspan="6" class="tr-empty">No weeks yet — click + Add Week.</td></tr>';
+  } else {
+    // Sort weeks newest first; insert payment dividers
+    const weeks = [...data.weeks].sort((a,b)=>b.sundayISO.localeCompare(a.sundayISO));
+    const payments = [...data.payments].sort((a,b)=>b.date.localeCompare(a.date));
 
-  for (const week of weeks){
-    const wTotal = mealWeekTotal(week.days);
-    const isPaid = !!week.paid;
-    const label = mealWeekLabel(week.sundayISO);
+    // Interleave: for each week, check if there's a payment between this week and the next
+    let pIdx = 0;
+    for (let i = 0; i < weeks.length; i++){
+      const week = weeks[i];
+      const nextWeek = weeks[i+1];
 
-    const yr = parseInt((week.sundayISO||'').slice(0,4),10);
-    if (yr === currentYear) spentTotal += wTotal;
-    if (!isPaid) oweTotal += wTotal;
+      // Insert any payment that falls between nextWeek.sundayISO and week.sundayISO
+      for (const pmt of payments){
+        const afterNext = !nextWeek || pmt.date >= nextWeek.sundayISO;
+        const beforeOrAtThis = pmt.date < week.sundayISO;
+        if (afterNext && beforeOrAtThis && !pmt._rendered){
+          pmt._rendered = true;
+          const pmtTr = document.createElement('tr');
+          pmtTr.className = 'meal-payment-divider';
+          const dateDisp = formatISODateForDisplay(pmt.date);
+          pmtTr.innerHTML = `
+            <td colspan="5" class="meal-pmt-cell">
+              ✓ Paid ${dateDisp} — ${fmtMoney(pmt.amount)}
+            </td>
+            <td class="tr-act-cell">
+              <button class="meal-del-btn" type="button" data-pid="${escHtml(pmt.id)}" title="Remove payment">✕</button>
+            </td>`;
+          pmtTr.querySelector('.meal-del-btn').addEventListener('click', function(){
+            if (!confirm('Remove this payment record?')) return;
+            const d2 = loadMealData();
+            d2.payments = d2.payments.filter(p=>p.id!==pmt.id);
+            saveMealData(d2);
+            renderMealTracker();
+          });
+          body.appendChild(pmtTr);
+        }
+      }
 
-    // Summary row (collapsed)
-    const tr = document.createElement('tr');
-    tr.className = isPaid ? 'tr-paid' : '';
-    tr.dataset.wid = week.id;
-    tr.style.cursor = 'pointer';
+      // Week row — flat, inline B/L/D inputs
+      const wTotal = mealWeekTotal(week);
+      const label = mealWeekLabel(week.sundayISO);
+      const tr = document.createElement('tr');
+      tr.dataset.wid = week.id;
+      tr.innerHTML = `
+        <td class="tr-name-cell" style="font-size:13px;">${escHtml(label)}</td>
+        <td class="tr-total-cell">
+          <input type="number" class="meal-inline-input" data-wid="${week.id}" data-cat="breakfast"
+            value="${week.breakfast||''}" placeholder="—" step="0.01" min="0">
+        </td>
+        <td class="tr-total-cell">
+          <input type="number" class="meal-inline-input" data-wid="${week.id}" data-cat="lunch"
+            value="${week.lunch||''}" placeholder="—" step="0.01" min="0">
+        </td>
+        <td class="tr-total-cell">
+          <input type="number" class="meal-inline-input" data-wid="${week.id}" data-cat="dinner"
+            value="${week.dinner||''}" placeholder="—" step="0.01" min="0">
+        </td>
+        <td class="tr-total-cell meal-week-total" data-wid="${week.id}"><strong>${fmtMoney(wTotal)||'—'}</strong></td>
+        <td class="tr-act-cell">
+          <button class="meal-del-btn" type="button" title="Delete week">✕</button>
+        </td>`;
 
-    const bTotal = mealCatTotal(week.days,'breakfast');
-    const lTotal = mealCatTotal(week.days,'lunch');
-    const dTotal = mealCatTotal(week.days,'dinner');
+      tr.querySelectorAll('.meal-inline-input').forEach(inp => {
+        inp.addEventListener('change', function(){
+          const d2 = loadMealData();
+          const w2 = d2.weeks.find(w=>w.id===this.dataset.wid);
+          if (!w2) return;
+          const val = parseFloat(this.value) || 0;
+          w2[this.dataset.cat] = val || undefined;
+          saveMealData(d2);
+          // Update row total inline
+          const t = mealWeekTotal(w2);
+          const totalCell = body.querySelector(`.meal-week-total[data-wid="${w2.id}"]`);
+          if (totalCell) totalCell.innerHTML = `<strong>${fmtMoney(t)||'—'}</strong>`;
+          renderMealSummary(data);
+        });
+      });
 
-    tr.innerHTML = `
-      <td class="tr-name-cell meal-expand-btn" title="Click to expand/edit">
-        <span class="meal-chevron">▶</span> ${escHtml(label)}
-      </td>
-      <td class="tr-total-cell">${fmtMoney(bTotal)}</td>
-      <td class="tr-total-cell">${fmtMoney(lTotal)}</td>
-      <td class="tr-total-cell">${fmtMoney(dTotal)}</td>
-      <td class="tr-total-cell"><strong>${fmtMoney(wTotal)||'$0.00'}</strong></td>
-      <td class="tr-date-cell">
-        <input type="date" class="meal-paid" value="${escHtml(week.paid||'')}"
-          aria-label="Paid date for ${escHtml(label)}">
-      </td>
-      <td class="tr-act-cell">
-        <button class="meal-del-btn" title="Delete week" type="button">✕</button>
-      </td>
-    `;
+      tr.querySelector('.meal-del-btn').addEventListener('click', function(){
+        if (!confirm(`Delete "${label}"?`)) return;
+        const d2 = loadMealData();
+        d2.weeks = d2.weeks.filter(w=>w.id!==week.id);
+        saveMealData(d2);
+        renderMealTracker();
+      });
 
-    // Expand/collapse detail row
-    tr.querySelector('.meal-expand-btn').addEventListener('click', ()=> toggleMealDetail(week.id, tr, week));
+      body.appendChild(tr);
+    }
 
-    // Paid date
-    tr.querySelector('.meal-paid').addEventListener('change', function(e){
-      e.stopPropagation();
-      const d2 = loadMealData();
-      const w2 = d2.weeks.find(w=>w.id===week.id);
-      if (w2){ w2.paid = this.value; saveMealData(d2); }
-      renderMealTracker();
-    });
-
-    // Delete
-    tr.querySelector('.meal-del-btn').addEventListener('click', function(e){
-      e.stopPropagation();
-      if (!confirm(`Delete "${label}"?`)) return;
-      const d2 = loadMealData();
-      d2.weeks = d2.weeks.filter(w=>w.id!==week.id);
-      saveMealData(d2);
-      renderMealTracker();
-    });
-
-    body.appendChild(tr);
+    // Any remaining payments (older than all weeks)
+    for (const pmt of payments){
+      if (pmt._rendered) continue;
+      const pmtTr = document.createElement('tr');
+      pmtTr.className = 'meal-payment-divider';
+      const dateDisp = formatISODateForDisplay(pmt.date);
+      pmtTr.innerHTML = `
+        <td colspan="5" class="meal-pmt-cell">
+          ✓ Paid ${dateDisp} — ${fmtMoney(pmt.amount)}
+        </td>
+        <td class="tr-act-cell">
+          <button class="meal-del-btn" type="button" data-pid="${escHtml(pmt.id)}" title="Remove payment">✕</button>
+        </td>`;
+      pmtTr.querySelector('.meal-del-btn').addEventListener('click', function(){
+        if (!confirm('Remove this payment record?')) return;
+        const d2 = loadMealData();
+        d2.payments = d2.payments.filter(p=>p.id!==pmt.id);
+        saveMealData(d2);
+        renderMealTracker();
+      });
+      body.appendChild(pmtTr);
+    }
+    // Clean up _rendered flags
+    payments.forEach(p => delete p._rendered);
   }
 
-  // Summary
-  const currentYearPrev = currentYear - 1;
-  const prevKey = `__meal_prevYear__${currentYearPrev}`;
+  renderMealSummary(data);
+}
+
+function formatISODateForDisplay(iso){
+  if (!iso) return '';
+  const parts = iso.split('-');
+  if (parts.length !== 3) return iso;
+  return `${parseInt(parts[1])}/${parseInt(parts[2])}/${parts[0]}`;
+}
+
+function renderMealSummary(data){
+  if (!data) data = loadMealData();
+  const summary = el('mealSummary');
+  const owe = computeMealOwe(data);
+  const oweRounded = roundUpTo5(owe);
+  const spent = computeMealSpent(data);
+  const year = new Date().getFullYear();
+  const prevYear = year - 1;
+  const prevKey = `__meal_prevYear__${prevYear}`;
   const prevVal = data[prevKey] !== undefined ? data[prevKey] : '';
 
   summary.innerHTML = `
     <div class="tracker-sum-row sum-owe">
-      <span class="tracker-sum-label">Owe (unpaid)</span>
-      <span class="tracker-sum-value">$${oweTotal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
-    </div>
-    <div class="tracker-sum-row sum-spent">
-      <span class="tracker-sum-label">Spent ${currentYear}</span>
-      <span class="tracker-sum-value">$${spentTotal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
-    </div>
-    <div class="tracker-sum-row">
-      <span class="tracker-sum-label">${currentYearPrev} Spend</span>
-      <input type="number" class="tracker-sum-prev-input" id="mealPrevYearInput"
-        value="${escHtml(prevVal)}" placeholder="0.00" step="0.01" min="0"
-        aria-label="${currentYearPrev} meal spend total">
-    </div>
-  `;
-  el('mealPrevYearInput').addEventListener('change', function(){
-    const d2 = loadMealData();
-    d2[prevKey] = this.value;
-    saveMealData(d2);
-  });
-  renderMealCalendar();
-}
-
-// Expand a week into a detail grid (7 days × 3 categories)
-function toggleMealDetail(wid, summaryTr, week){
-  // If already expanded, collapse
-  const existingDetail = document.getElementById(`meal-detail-${wid}`);
-  if (existingDetail){
-    existingDetail.remove();
-    summaryTr.querySelector('.meal-chevron').textContent = '▶';
-    return;
-  }
-  summaryTr.querySelector('.meal-chevron').textContent = '▼';
-
-  const detailTr = document.createElement('tr');
-  detailTr.id = `meal-detail-${wid}`;
-  detailTr.className = 'meal-detail-row';
-
-  // Build inner table: rows = categories, cols = days
-  const dayLabels = Array.from({length:7},(_,i)=> mealDayLabel(week.sundayISO, i));
-
-  let dayHeaderCells = dayLabels.map(l=>`<th class="meal-day-th">${l}</th>`).join('');
-  let rows = MEAL_CATS.map(cat => {
-    const label = cat.charAt(0).toUpperCase()+cat.slice(1);
-    const cells = week.days.map((day,di)=>{
-      const val = day[cat] || '';
-      return `<td><div class="currency-wrap" style="min-width:70px">
-        <input type="number" class="meal-cell-input" step="0.01" min="0"
-          data-wid="${wid}" data-day="${di}" data-cat="${cat}"
-          value="${val}" placeholder="0">
-      </div></td>`;
-    }).join('');
-    return `<tr><td class="meal-cat-label">${label}</td>${cells}</tr>`;
-  }).join('');
-
-  // Day totals row
-  const dayTotals = week.days.map(day =>
-    MEAL_CATS.reduce((s,c)=>s+(Number(day[c])||0),0)
-  );
-  const dayTotalCells = dayTotals.map(t=>
-    `<td class="meal-day-total">${fmtMoney(t)}</td>`
-  ).join('');
-
-  detailTr.innerHTML = `
-    <td colspan="7" style="padding:0">
-      <div class="meal-detail-wrap">
-        <table class="meal-detail-table">
-          <thead>
-            <tr>
-              <th class="meal-cat-label-th"></th>
-              ${dayHeaderCells}
-            </tr>
-          </thead>
-          <tbody>
-            ${rows}
-            <tr class="meal-totals-row">
-              <td class="meal-cat-label" style="color:var(--muted);font-size:11px">Total</td>
-              ${dayTotalCells}
-            </tr>
-          </tbody>
-        </table>
+      <span class="tracker-sum-label">Currently Owe</span>
+      <div style="text-align:right;">
+        <span class="tracker-sum-value">${fmtMoney(oweRounded)}</span>
+        ${owe !== oweRounded ? `<div style="font-size:11px;color:var(--muted);margin-top:1px;">actual ${fmtMoney(owe)} → rounded up to $5</div>` : ''}
       </div>
-    </td>
-  `;
-
-  summaryTr.insertAdjacentElement('afterend', detailTr);
-
-  // Wire inputs
-  detailTr.querySelectorAll('.meal-cell-input').forEach(inp => {
-    inp.addEventListener('change', function(){
-      const d2 = loadMealData();
-      const w2 = d2.weeks.find(w=>w.id===this.dataset.wid);
-      if (!w2) return;
-      const di = parseInt(this.dataset.day);
-      const cat = this.dataset.cat;
-      const val = Number(this.value) || 0;
-      w2.days[di][cat] = val || undefined;
-      saveMealData(d2);
-      // Update day total cell in detail table
-      const dayIdx = di;
-      const dayTotal = MEAL_CATS.reduce((s,c)=>s+(Number(w2.days[dayIdx][c])||0),0);
-      const totalCells = detailTr.querySelectorAll('.meal-day-total');
-      if (totalCells[dayIdx]) totalCells[dayIdx].textContent = fmtMoney(dayTotal) || '';
-      // Update summary row totals without full re-render
-      const bT = mealCatTotal(w2.days,'breakfast');
-      const lT = mealCatTotal(w2.days,'lunch');
-      const dT = mealCatTotal(w2.days,'dinner');
-      const wT = bT+lT+dT;
-      const cells = summaryTr.querySelectorAll('.tr-total-cell');
-      if (cells[0]) cells[0].textContent = fmtMoney(bT);
-      if (cells[1]) cells[1].textContent = fmtMoney(lT);
-      if (cells[2]) cells[2].textContent = fmtMoney(dT);
-      if (cells[3]) cells[3].innerHTML = `<strong>${fmtMoney(wT)||'$0.00'}</strong>`;
-      // Recalc summary footer
-      renderMealSummaryOnly();
-    });
-  });
-}
-
-function renderMealSummaryOnly(){
-  const data = loadMealData();
-  const currentYear = new Date().getFullYear();
-  let oweTotal = 0, spentTotal = 0;
-  for (const week of data.weeks){
-    const wT = mealWeekTotal(week.days);
-    const yr = parseInt((week.sundayISO||'').slice(0,4),10);
-    if (yr === currentYear) spentTotal += wT;
-    if (!week.paid) oweTotal += wT;
-  }
-  const currentYearPrev = currentYear - 1;
-  const prevKey = `__meal_prevYear__${currentYearPrev}`;
-  const prevVal = data[prevKey] !== undefined ? data[prevKey] : '';
-
-  el('mealSummary').innerHTML = `
-    <div class="tracker-sum-row sum-owe">
-      <span class="tracker-sum-label">Owe (unpaid)</span>
-      <span class="tracker-sum-value">$${oweTotal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+    </div>
+    <div class="tracker-sum-row" style="flex-direction:column;align-items:flex-start;gap:8px;padding-bottom:14px;">
+      <span class="tracker-sum-label">Log a Payment</span>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;width:100%;">
+        <input type="date" id="mealPayDate" style="padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--input-bg);color:var(--text);font-size:14px;">
+        <input type="number" id="mealPayAmt" value="${oweRounded}" step="5" min="0"
+          style="width:100px;padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--input-bg);color:var(--text);font-size:14px;font-variant-numeric:tabular-nums;"
+          placeholder="Amount">
+        <button id="btnLogMealPayment" class="primary" type="button" style="padding:7px 14px;">Log Payment</button>
+      </div>
     </div>
     <div class="tracker-sum-row sum-spent">
-      <span class="tracker-sum-label">Spent ${currentYear}</span>
-      <span class="tracker-sum-value">$${spentTotal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+      <span class="tracker-sum-label">Spent ${year}</span>
+      <span class="tracker-sum-value">$${spent.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
     </div>
     <div class="tracker-sum-row">
-      <span class="tracker-sum-label">${currentYearPrev} Spend</span>
+      <span class="tracker-sum-label">${prevYear} Spend</span>
       <input type="number" class="tracker-sum-prev-input" id="mealPrevYearInput"
         value="${escHtml(prevVal)}" placeholder="0.00" step="0.01" min="0">
     </div>
   `;
+
+  el('btnLogMealPayment').addEventListener('click', function(){
+    const dateVal = el('mealPayDate').value;
+    const amtVal = parseFloat(el('mealPayAmt').value) || 0;
+    if (!dateVal){ alert('Enter a payment date.'); return; }
+    if (!amtVal){ alert('Enter an amount.'); return; }
+    const d2 = loadMealData();
+    d2.payments.push({ id: `mp_${Date.now()}`, date: dateVal, amount: amtVal });
+    saveMealData(d2);
+    renderMealTracker();
+  });
+
   el('mealPrevYearInput').addEventListener('change', function(){
     const d2 = loadMealData();
     d2[prevKey] = this.value;
@@ -2031,21 +1979,13 @@ function renderMealSummaryOnly(){
 // ==================== MEAL CALENDAR PICKER ====================
 
 let mealPickerYear = new Date().getFullYear();
-let mealPickerMonth = new Date().getMonth(); // 0-based
-
-let mealCalYear = new Date().getFullYear();
-let mealCalMonth = new Date().getMonth();
-
-const MONTH_NAMES = ['January','February','March','April','May','June',
-  'July','August','September','October','November','December'];
-const DOW_LABELS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+let mealPickerMonth = new Date().getMonth();
 
 function addMealWeek(){
   mealPickerYear = new Date().getFullYear();
   mealPickerMonth = new Date().getMonth();
   renderMealPicker();
-  const ov = el('mealPickerOverlay');
-  ov.style.display = 'flex';
+  el('mealPickerOverlay').style.display = 'flex';
 }
 
 function closeMealPicker(){
@@ -2058,16 +1998,12 @@ function renderMealPicker(){
   const data = loadMealData();
   const existingSundays = new Set(data.weeks.map(w => w.sundayISO));
 
-  // Build calendar grid
   const firstDay = new Date(mealPickerYear, mealPickerMonth, 1);
-  const startOffset = firstDay.getDay(); // 0=Sun, so Sun weeks start on col 0
+  const startOffset = firstDay.getDay();
   const daysInMonth = new Date(mealPickerYear, mealPickerMonth+1, 0).getDate();
 
   let html = '<div class="mpc-grid">';
-  // DOW headers
-  DOW_LABELS.forEach(d => { html += `<div class="mpc-dow">${d}</div>`; });
-
-  // Blank cells before first day
+  DOW_LABELS_SHORT.forEach(d => { html += `<div class="mpc-dow">${d}</div>`; });
   for (let i = 0; i < startOffset; i++) html += '<div class="mpc-cell mpc-blank"></div>';
 
   for (let d = 1; d <= daysInMonth; d++){
@@ -2083,15 +2019,8 @@ function renderMealPicker(){
     if (exists) cls += ' mpc-exists';
     if (isToday) cls += ' mpc-today';
 
-    const clickAttr = isSunday && !exists
-      ? `onclick="mealPickerSelectSunday('${iso}')" style="cursor:pointer"`
-      : '';
-
-    const title = isSunday
-      ? (exists ? 'Week already added' : 'Click to add this week')
-      : '';
-
-    html += `<div class="${cls}" ${clickAttr} title="${title}">${d}</div>`;
+    const click = isSunday && !exists ? `onclick="mealPickerSelectSunday('${iso}')"` : '';
+    html += `<div class="${cls}" ${click}>${d}</div>`;
   }
   html += '</div>';
   grid.innerHTML = html;
@@ -2099,108 +2028,11 @@ function renderMealPicker(){
 
 function mealPickerSelectSunday(sundayISO){
   const data = loadMealData();
-  if (data.weeks.find(w => w.sundayISO === sundayISO)){
-    return; // already exists
-  }
+  if (data.weeks.find(w => w.sundayISO === sundayISO)) return;
   const id = `mw_${Date.now()}`;
-  const days = Array.from({length:7}, ()=>({breakfast:undefined,lunch:undefined,dinner:undefined}));
-  data.weeks.push({ id, sundayISO, days, paid:'' });
+  data.weeks.push({ id, sundayISO, breakfast:undefined, lunch:undefined, dinner:undefined });
   data.weeks.sort((a,b) => b.sundayISO.localeCompare(a.sundayISO));
   saveMealData(data);
   closeMealPicker();
   renderMealTracker();
-  renderMealCalendar();
-}
-
-// ==================== MEAL CALENDAR OVERVIEW ====================
-
-function renderMealCalendar(){
-  const titleEl = el('mealCalTitle');
-  if (!titleEl) return;
-  titleEl.textContent = `${MONTH_NAMES[mealCalMonth]} ${mealCalYear}`;
-
-  const data = loadMealData();
-
-  // Build a map of date→{total, paid, wid} for fast lookup
-  const dateMap = {}; // iso → {total, paid, cats}
-  const weekMap = {}; // sundayISO → {paid, total}
-  for (const week of data.weeks){
-    const sun = parseISODate(week.sundayISO);
-    const wTotal = mealWeekTotal(week.days);
-    weekMap[week.sundayISO] = { paid: !!week.paid, total: wTotal };
-    week.days.forEach((day, di) => {
-      const d = new Date(sun); d.setDate(d.getDate() + di);
-      const iso = toISODate(d);
-      const dayTotal = MEAL_CATS.reduce((s,c) => s+(Number(day[c])||0), 0);
-      if (dayTotal > 0) dateMap[iso] = { total: dayTotal, paid: !!week.paid, sundayISO: week.sundayISO };
-    });
-  }
-
-  const firstDay = new Date(mealCalYear, mealCalMonth, 1);
-  const startOffset = firstDay.getDay();
-  const daysInMonth = new Date(mealCalYear, mealCalMonth+1, 0).getDate();
-
-  // Figure out which Sundays appear in this month view
-  // We need to shade whole week rows
-  // Build set of all ISO dates in view and their week membership
-  const todayISO = toISODate(new Date());
-
-  let html = '<div class="mcc-grid">';
-  DOW_LABELS.forEach(d => { html += `<div class="mcc-dow">${d}</div>`; });
-
-  // blank leading cells
-  for (let i = 0; i < startOffset; i++) html += '<div class="mcc-cell mcc-blank"></div>';
-
-  for (let d = 1; d <= daysInMonth; d++){
-    const date = new Date(mealCalYear, mealCalMonth, d);
-    const iso = toISODate(date);
-    const dow = date.getDay();
-
-    // Find which week this date belongs to (walk back to Sunday)
-    const sun = new Date(date); sun.setDate(sun.getDate() - dow);
-    const sunISO = toISODate(sun);
-    const weekInfo = weekMap[sunISO];
-
-    const entry = dateMap[iso];
-    const isToday = iso === todayISO;
-
-    let bg = '';
-    if (weekInfo){
-      bg = weekInfo.paid
-        ? 'background:rgba(0,200,120,.12);'
-        : 'background:rgba(255,200,0,.08);';
-    }
-
-    let amtHtml = '';
-    if (entry && entry.total > 0){
-      amtHtml = `<span class="mcc-amt${entry.paid?' mcc-paid':''}">${fmtMoney(entry.total)}</span>`;
-    }
-
-    const todayCls = isToday ? ' mcc-today' : '';
-    const sunCls = dow === 0 ? ' mcc-sunday-col' : '';
-    const hasCls = entry ? ' mcc-has-entry' : '';
-
-    html += `<div class="mcc-cell${todayCls}${sunCls}${hasCls}" style="${bg}">
-      <span class="mcc-day-num">${d}</span>
-      ${amtHtml}
-    </div>`;
-  }
-  html += '</div>';
-  el('mealCalGrid').innerHTML = html;
-
-  // Month totals below calendar
-  let monthSpent = 0, monthOwe = 0;
-  Object.entries(dateMap).forEach(([iso, info]) => {
-    if (iso.startsWith(`${mealCalYear}-${String(mealCalMonth+1).padStart(2,'0')}`)){
-      monthSpent += info.total;
-      if (!info.paid) monthOwe += info.total;
-    }
-  });
-
-  el('mealCalTotals').innerHTML = `
-    <div style="display:flex;gap:20px;padding:10px 4px 2px;font-size:13px;flex-wrap:wrap;">
-      <span style="color:var(--muted);">Month total: <strong style="color:var(--text);">${fmtMoney(monthSpent)||'$0.00'}</strong></span>
-      <span style="color:var(--muted);">Unpaid this month: <strong style="color:var(--danger);">${fmtMoney(monthOwe)||'$0.00'}</strong></span>
-    </div>
-  `;
 }
