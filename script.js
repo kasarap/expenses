@@ -46,7 +46,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '66-meal-simplified';
+const APP_VERSION = '67-meal-per-day';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
@@ -1751,7 +1751,12 @@ function mealWeekLabel(sundayISO){
 }
 
 function mealWeekTotal(week){
-  return (Number(week.breakfast)||0) + (Number(week.lunch)||0) + (Number(week.dinner)||0);
+  // Supports both old flat shape (breakfast/lunch/dinner) and new days[] shape
+  if (Array.isArray(week.days)){
+    return week.days.reduce((s,d)=>
+      s + MEAL_CATS.reduce((ss,c)=>ss+(Number(d[c])||0),0), 0);
+  }
+  return (Number(week.breakfast)||0)+(Number(week.lunch)||0)+(Number(week.dinner)||0);
 }
 
 function fmtMoney(n){
@@ -1786,162 +1791,209 @@ function computeMealSpent(data){
 
 function renderMealTracker(){
   const body = el('mealBody');
-  const summary = el('mealSummary');
   const data = loadMealData();
-
   body.innerHTML = '';
 
-  if (!data.weeks.length && !data.payments.length){
-    body.innerHTML = '<tr><td colspan="6" class="tr-empty">No weeks yet — click + Add Week.</td></tr>';
-  } else {
-    // Sort weeks newest first; insert payment dividers
-    const weeks = [...data.weeks].sort((a,b)=>b.sundayISO.localeCompare(a.sundayISO));
-    const payments = [...data.payments].sort((a,b)=>b.date.localeCompare(a.date));
+  const weeks = [...data.weeks].sort((a,b)=>b.sundayISO.localeCompare(a.sundayISO));
+  const payments = [...data.payments].sort((a,b)=>b.date.localeCompare(a.date));
 
-    // Interleave: for each week, check if there's a payment between this week and the next
-    let pIdx = 0;
-    for (let i = 0; i < weeks.length; i++){
-      const week = weeks[i];
-      const nextWeek = weeks[i+1];
+  if (!weeks.length && !payments.length){
+    body.innerHTML = '<p class="tr-empty" style="text-align:center;padding:24px 0;color:var(--muted);">No weeks yet — click + Add Week.</p>';
+    renderMealSummary(data);
+    return;
+  }
 
-      // Insert any payment that falls between nextWeek.sundayISO and week.sundayISO
-      for (const pmt of payments){
-        const afterNext = !nextWeek || pmt.date >= nextWeek.sundayISO;
-        const beforeOrAtThis = pmt.date < week.sundayISO;
-        if (afterNext && beforeOrAtThis && !pmt._rendered){
-          pmt._rendered = true;
-          const pmtTr = document.createElement('tr');
-          pmtTr.className = 'meal-payment-divider';
-          const dateDisp = formatISODateForDisplay(pmt.date);
-          pmtTr.innerHTML = `
-            <td colspan="5" class="meal-pmt-cell">
-              ✓ Paid ${dateDisp} — ${fmtMoney(pmt.amount)}
-            </td>
-            <td class="tr-act-cell">
-              <button class="meal-del-btn" type="button" data-pid="${escHtml(pmt.id)}" title="Remove payment">✕</button>
-            </td>`;
-          pmtTr.querySelector('.meal-del-btn').addEventListener('click', function(){
-            if (!confirm('Remove this payment record?')) return;
-            const d2 = loadMealData();
-            d2.payments = d2.payments.filter(p=>p.id!==pmt.id);
-            saveMealData(d2);
-            renderMealTracker();
-          });
-          body.appendChild(pmtTr);
-        }
-      }
+  // interleave weeks and payment dividers chronologically (newest first)
+  const pmtUsed = new Set();
 
-      // Week row — flat, inline B/L/D inputs
-      const wTotal = mealWeekTotal(week);
-      const label = mealWeekLabel(week.sundayISO);
-      const tr = document.createElement('tr');
-      tr.dataset.wid = week.id;
-      tr.innerHTML = `
-        <td class="tr-name-cell" style="font-size:13px;">${escHtml(label)}</td>
-        <td class="tr-total-cell">
-          <input type="number" class="meal-inline-input" data-wid="${week.id}" data-cat="breakfast"
-            value="${week.breakfast||''}" placeholder="—" step="0.01" min="0">
-        </td>
-        <td class="tr-total-cell">
-          <input type="number" class="meal-inline-input" data-wid="${week.id}" data-cat="lunch"
-            value="${week.lunch||''}" placeholder="—" step="0.01" min="0">
-        </td>
-        <td class="tr-total-cell">
-          <input type="number" class="meal-inline-input" data-wid="${week.id}" data-cat="dinner"
-            value="${week.dinner||''}" placeholder="—" step="0.01" min="0">
-        </td>
-        <td class="tr-total-cell meal-week-total" data-wid="${week.id}"><strong>${fmtMoney(wTotal)||'—'}</strong></td>
-        <td class="tr-act-cell">
-          <button class="meal-del-btn" type="button" title="Delete week">✕</button>
-        </td>`;
+  for (let i = 0; i < weeks.length; i++){
+    const week = weeks[i];
+    const nextWeek = weeks[i+1];
 
-      tr.querySelectorAll('.meal-inline-input').forEach(inp => {
-        inp.addEventListener('change', function(){
-          const d2 = loadMealData();
-          const w2 = d2.weeks.find(w=>w.id===this.dataset.wid);
-          if (!w2) return;
-          const val = parseFloat(this.value) || 0;
-          w2[this.dataset.cat] = val || undefined;
-          saveMealData(d2);
-          // Update row total inline
-          const t = mealWeekTotal(w2);
-          const totalCell = body.querySelector(`.meal-week-total[data-wid="${w2.id}"]`);
-          if (totalCell) totalCell.innerHTML = `<strong>${fmtMoney(t)||'—'}</strong>`;
-          renderMealSummary(data);
-        });
-      });
-
-      tr.querySelector('.meal-del-btn').addEventListener('click', function(){
-        if (!confirm(`Delete "${label}"?`)) return;
-        const d2 = loadMealData();
-        d2.weeks = d2.weeks.filter(w=>w.id!==week.id);
-        saveMealData(d2);
-        renderMealTracker();
-      });
-
-      body.appendChild(tr);
-    }
-
-    // Any remaining payments (older than all weeks)
+    // Insert payments that fall between nextWeek and this week
     for (const pmt of payments){
-      if (pmt._rendered) continue;
-      const pmtTr = document.createElement('tr');
-      pmtTr.className = 'meal-payment-divider';
-      const dateDisp = formatISODateForDisplay(pmt.date);
-      pmtTr.innerHTML = `
-        <td colspan="5" class="meal-pmt-cell">
-          ✓ Paid ${dateDisp} — ${fmtMoney(pmt.amount)}
-        </td>
-        <td class="tr-act-cell">
-          <button class="meal-del-btn" type="button" data-pid="${escHtml(pmt.id)}" title="Remove payment">✕</button>
-        </td>`;
-      pmtTr.querySelector('.meal-del-btn').addEventListener('click', function(){
-        if (!confirm('Remove this payment record?')) return;
-        const d2 = loadMealData();
-        d2.payments = d2.payments.filter(p=>p.id!==pmt.id);
-        saveMealData(d2);
-        renderMealTracker();
-      });
-      body.appendChild(pmtTr);
+      if (pmtUsed.has(pmt.id)) continue;
+      const afterNext = !nextWeek || pmt.date >= nextWeek.sundayISO;
+      const beforeThis = pmt.date < week.sundayISO;
+      if (afterNext && beforeThis){
+        pmtUsed.add(pmt.id);
+        body.appendChild(makeMealPaymentDiv(pmt));
+      }
     }
-    // Clean up _rendered flags
-    payments.forEach(p => delete p._rendered);
+
+    body.appendChild(makeMealWeekCard(week, data));
+  }
+
+  // Remaining payments older than all weeks
+  for (const pmt of payments){
+    if (!pmtUsed.has(pmt.id)){
+      body.appendChild(makeMealPaymentDiv(pmt));
+    }
   }
 
   renderMealSummary(data);
 }
 
+function makeMealWeekCard(week, data){
+  const sun = parseISODate(week.sundayISO);
+  const days = Array.from({length:7}, (_,i)=>{
+    const d = new Date(sun); d.setDate(d.getDate()+i);
+    return d;
+  });
+  const dayLabels = days.map(d=>`${DOW_LABELS_SHORT[d.getDay()]}<br><span class="meal-day-date">${d.getMonth()+1}/${d.getDate()}</span>`);
+
+  // days array for data: week.days[0..6][cat]
+  if (!Array.isArray(week.days)){
+    week.days = Array.from({length:7},()=>({}));
+  }
+  // Ensure 7 entries
+  while(week.days.length < 7) week.days.push({});
+
+  const label = mealWeekLabel(week.sundayISO);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'meal-week-card';
+  wrap.dataset.wid = week.id;
+
+  // Build table: header row = day labels, rows = B/L/D + totals
+  let headerCells = `<th class="mwc-cat-th"></th>` +
+    dayLabels.map(l=>`<th class="mwc-day-th">${l}</th>`).join('') +
+    `<th class="mwc-total-th">Total</th>`;
+
+  let catRows = MEAL_CATS.map(cat => {
+    const catLabel = cat.charAt(0).toUpperCase()+cat.slice(1);
+    const catTotal = week.days.reduce((s,d)=>s+(Number(d[cat])||0),0);
+    const cells = week.days.map((day,di)=>{
+      const val = day[cat]||'';
+      return `<td class="mwc-input-td">
+        <input type="number" class="meal-day-input" step="0.01" min="0"
+          data-wid="${week.id}" data-day="${di}" data-cat="${cat}"
+          value="${val}" placeholder="">
+      </td>`;
+    }).join('');
+    return `<tr>
+      <td class="mwc-cat-label">${catLabel}</td>
+      ${cells}
+      <td class="mwc-cat-total" data-wid="${week.id}" data-cat="${cat}">${catTotal>0?fmtMoney(catTotal):''}</td>
+    </tr>`;
+  }).join('');
+
+  // Day totals row
+  const dayTotals = week.days.map(day=>MEAL_CATS.reduce((s,c)=>s+(Number(day[c])||0),0));
+  const weekGrandTotal = dayTotals.reduce((s,t)=>s+t,0);
+  const dayTotalCells = dayTotals.map((t,di)=>
+    `<td class="mwc-day-total" data-wid="${week.id}" data-di="${di}">${t>0?fmtMoney(t):''}</td>`
+  ).join('');
+
+  wrap.innerHTML = `
+    <div class="mwc-header">
+      <span class="mwc-label">${escHtml(label)}</span>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span class="mwc-grand-total" data-wid="${week.id}">${fmtMoney(weekGrandTotal)||'$0.00'}</span>
+        <button class="meal-del-btn" type="button" title="Delete week">✕</button>
+      </div>
+    </div>
+    <div class="mwc-table-wrap">
+      <table class="mwc-table">
+        <thead><tr>${headerCells}</tr></thead>
+        <tbody>
+          ${catRows}
+          <tr class="mwc-day-total-row">
+            <td class="mwc-cat-label" style="color:var(--muted);font-size:11px;">Total</td>
+            ${dayTotalCells}
+            <td class="mwc-cat-total mwc-grand" data-wid="${week.id}" data-grand="1"><strong>${fmtMoney(weekGrandTotal)||'$0.00'}</strong></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>`;
+
+  // Wire inputs
+  wrap.querySelectorAll('.meal-day-input').forEach(inp=>{
+    inp.addEventListener('change', function(){
+      const d2 = loadMealData();
+      const w2 = d2.weeks.find(w=>w.id===this.dataset.wid);
+      if(!w2) return;
+      if(!Array.isArray(w2.days)) w2.days=Array.from({length:7},()=>({}));
+      while(w2.days.length<7) w2.days.push({});
+      const di=parseInt(this.dataset.day), cat=this.dataset.cat;
+      const val=parseFloat(this.value)||0;
+      w2.days[di][cat]=val||undefined;
+      saveMealData(d2);
+      // Update day total cell
+      const dayT=MEAL_CATS.reduce((s,c)=>s+(Number(w2.days[di][c])||0),0);
+      const dayTCell=wrap.querySelector(`.mwc-day-total[data-wid="${w2.id}"][data-di="${di}"]`);
+      if(dayTCell) dayTCell.textContent=dayT>0?fmtMoney(dayT):'';
+      // Update cat total
+      const catT=w2.days.reduce((s,d)=>s+(Number(d[cat])||0),0);
+      const catTCell=wrap.querySelector(`.mwc-cat-total[data-wid="${w2.id}"][data-cat="${cat}"]`);
+      if(catTCell) catTCell.textContent=catT>0?fmtMoney(catT):'';
+      // Update grand total
+      const grand=MEAL_CATS.reduce((s,c)=>s+w2.days.reduce((ss,d)=>ss+(Number(d[c])||0),0),0);
+      wrap.querySelectorAll(`.mwc-grand-total[data-wid="${w2.id}"]`).forEach(el2=>el2.textContent=fmtMoney(grand)||'$0.00');
+      const grandCell=wrap.querySelector(`.mwc-grand[data-wid="${w2.id}"]`);
+      if(grandCell) grandCell.innerHTML=`<strong>${fmtMoney(grand)||'$0.00'}</strong>`;
+      renderMealSummary(d2);
+    });
+  });
+
+  wrap.querySelector('.meal-del-btn').addEventListener('click',function(){
+    if(!confirm(`Delete "${label}"?`)) return;
+    const d2=loadMealData();
+    d2.weeks=d2.weeks.filter(w=>w.id!==week.id);
+    saveMealData(d2);
+    renderMealTracker();
+  });
+
+  return wrap;
+}
+
+function makeMealPaymentDiv(pmt){
+  const div = document.createElement('div');
+  div.className = 'meal-payment-divider';
+  const dateDisp = formatISODateForDisplay(pmt.date);
+  div.innerHTML = `
+    <span>✓ Paid ${dateDisp} — ${fmtMoney(pmt.amount)}</span>
+    <button class="meal-del-btn" type="button" title="Remove payment">✕</button>`;
+  div.querySelector('.meal-del-btn').addEventListener('click',function(){
+    if(!confirm('Remove this payment record?')) return;
+    const d2=loadMealData();
+    d2.payments=d2.payments.filter(p=>p.id!==pmt.id);
+    saveMealData(d2);
+    renderMealTracker();
+  });
+  return div;
+}
+
 function formatISODateForDisplay(iso){
-  if (!iso) return '';
-  const parts = iso.split('-');
-  if (parts.length !== 3) return iso;
-  return `${parseInt(parts[1])}/${parseInt(parts[2])}/${parts[0]}`;
+  if(!iso) return '';
+  const p=iso.split('-');
+  return p.length===3?`${parseInt(p[1])}/${parseInt(p[2])}/${p[0]}`:iso;
 }
 
 function renderMealSummary(data){
-  if (!data) data = loadMealData();
-  const summary = el('mealSummary');
-  const owe = computeMealOwe(data);
-  const oweRounded = roundUpTo5(owe);
-  const spent = computeMealSpent(data);
-  const year = new Date().getFullYear();
-  const prevYear = year - 1;
-  const prevKey = `__meal_prevYear__${prevYear}`;
-  const prevVal = data[prevKey] !== undefined ? data[prevKey] : '';
+  if(!data) data=loadMealData();
+  const summary=el('mealSummary');
+  const owe=computeMealOwe(data);
+  const oweRounded=roundUpTo5(owe);
+  const spent=computeMealSpent(data);
+  const year=new Date().getFullYear();
+  const prevYear=year-1;
+  const prevKey=`__meal_prevYear__${prevYear}`;
+  const prevVal=data[prevKey]!==undefined?data[prevKey]:'';
 
-  summary.innerHTML = `
+  summary.innerHTML=`
     <div class="tracker-sum-row sum-owe">
       <span class="tracker-sum-label">Currently Owe</span>
       <div style="text-align:right;">
-        <span class="tracker-sum-value">${fmtMoney(oweRounded)}</span>
-        ${owe !== oweRounded ? `<div style="font-size:11px;color:var(--muted);margin-top:1px;">actual ${fmtMoney(owe)} → rounded up to $5</div>` : ''}
+        <span class="tracker-sum-value">${fmtMoney(oweRounded)||'$0.00'}</span>
+        ${owe!==oweRounded?`<div style="font-size:11px;color:var(--muted);margin-top:1px;">actual ${fmtMoney(owe)} → rounded up to $5</div>`:''}
       </div>
     </div>
     <div class="tracker-sum-row" style="flex-direction:column;align-items:flex-start;gap:8px;padding-bottom:14px;">
       <span class="tracker-sum-label">Log a Payment</span>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;width:100%;">
         <input type="date" id="mealPayDate" style="padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--input-bg);color:var(--text);font-size:14px;">
-        <input type="number" id="mealPayAmt" value="${oweRounded}" step="5" min="0"
+        <input type="number" id="mealPayAmt" value="${oweRounded||''}" step="5" min="0"
           style="width:100px;padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--input-bg);color:var(--text);font-size:14px;font-variant-numeric:tabular-nums;"
           placeholder="Amount">
         <button id="btnLogMealPayment" class="primary" type="button" style="padding:7px 14px;">Log Payment</button>
@@ -1955,26 +2007,25 @@ function renderMealSummary(data){
       <span class="tracker-sum-label">${prevYear} Spend</span>
       <input type="number" class="tracker-sum-prev-input" id="mealPrevYearInput"
         value="${escHtml(prevVal)}" placeholder="0.00" step="0.01" min="0">
-    </div>
-  `;
+    </div>`;
 
-  el('btnLogMealPayment').addEventListener('click', function(){
-    const dateVal = el('mealPayDate').value;
-    const amtVal = parseFloat(el('mealPayAmt').value) || 0;
-    if (!dateVal){ alert('Enter a payment date.'); return; }
-    if (!amtVal){ alert('Enter an amount.'); return; }
-    const d2 = loadMealData();
-    d2.payments.push({ id: `mp_${Date.now()}`, date: dateVal, amount: amtVal });
+  el('btnLogMealPayment').addEventListener('click',function(){
+    const dateVal=el('mealPayDate').value;
+    const amtVal=parseFloat(el('mealPayAmt').value)||0;
+    if(!dateVal){alert('Enter a payment date.');return;}
+    if(!amtVal){alert('Enter an amount.');return;}
+    const d2=loadMealData();
+    d2.payments.push({id:`mp_${Date.now()}`,date:dateVal,amount:amtVal});
     saveMealData(d2);
     renderMealTracker();
   });
-
-  el('mealPrevYearInput').addEventListener('change', function(){
-    const d2 = loadMealData();
-    d2[prevKey] = this.value;
+  el('mealPrevYearInput').addEventListener('change',function(){
+    const d2=loadMealData();
+    d2[prevKey]=this.value;
     saveMealData(d2);
   });
 }
+
 
 // ==================== MEAL CALENDAR PICKER ====================
 
@@ -2030,7 +2081,7 @@ function mealPickerSelectSunday(sundayISO){
   const data = loadMealData();
   if (data.weeks.find(w => w.sundayISO === sundayISO)) return;
   const id = `mw_${Date.now()}`;
-  data.weeks.push({ id, sundayISO, breakfast:undefined, lunch:undefined, dinner:undefined });
+  data.weeks.push({ id, sundayISO, days: Array.from({length:7},()=>({})) });
   data.weeks.sort((a,b) => b.sundayISO.localeCompare(a.sundayISO));
   saveMealData(data);
   closeMealPicker();

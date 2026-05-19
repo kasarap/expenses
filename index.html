@@ -156,22 +156,8 @@
         <button id="btnAddMealWeek" class="primary" type="button">+ Add Week</button>
       </div>
       <p class="hint" style="margin-top:0;margin-bottom:12px;">Saved locally — not exported. One payment covers all owed at that date.</p>
-      <div class="tracker-table-wrap">
-        <table class="tracker-table" id="mealTable">
-          <thead>
-            <tr>
-              <th class="tr-name">Week</th>
-              <th class="tr-total">Breakfast</th>
-              <th class="tr-total">Lunch</th>
-              <th class="tr-total">Dinner</th>
-              <th class="tr-total">Total</th>
-              <th class="tr-act"></th>
-            </tr>
-          </thead>
-          <tbody id="mealBody">
-            <tr><td colspan="6" class="tr-empty">No weeks yet — click + Add Week.</td></tr>
-          </tbody>
-        </table>
+      <div id="mealBody">
+        <p class="tr-empty" style="text-align:center;padding:24px 0;color:var(--muted);">No weeks yet — click + Add Week.</p>
       </div>
       <div class="tracker-summary" id="mealSummary"></div>
     </section>
