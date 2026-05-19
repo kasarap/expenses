@@ -541,3 +541,64 @@ th.tr-date,.tracker-table td.tr-date-cell{width:130px}
   th.tr-name,.tracker-table td.tr-name-cell{min-width:160px}
   th.tr-date,.tracker-table td.tr-date-cell{width:110px}
 }
+
+/* ============================================================ */
+/* MEAL TRACKER (Tab 3)                                          */
+/* ============================================================ */
+
+th.tr-act, .tracker-table td.tr-act-cell { width: 36px; text-align: center; }
+
+.meal-expand-btn { cursor: pointer; user-select: none; }
+.meal-chevron { font-size: 10px; opacity: .6; margin-right: 4px; display: inline-block; transition: transform .15s; }
+
+.meal-del-btn {
+  background: transparent !important; border: 1px solid rgba(255,92,92,.3) !important;
+  color: var(--danger) !important; padding: 4px 7px !important; font-size: 12px !important;
+  border-radius: 4px; cursor: pointer; line-height: 1 !important;
+}
+.meal-del-btn:hover { background: rgba(255,92,92,.1) !important; }
+
+.meal-detail-row > td { padding: 0 !important; border-bottom: 1px solid var(--line); }
+
+.meal-detail-wrap {
+  padding: 10px 12px 14px;
+  background: rgba(255,255,255,.025);
+  overflow-x: auto;
+}
+
+.meal-detail-table {
+  width: 100%; border-collapse: separate; border-spacing: 0;
+  min-width: 520px;
+}
+.meal-detail-table th, .meal-detail-table td {
+  padding: 6px 8px; font-size: 12px; border-bottom: 1px solid rgba(255,255,255,.05);
+  vertical-align: middle;
+}
+.meal-detail-table tbody tr:last-child td { border-bottom: none; }
+
+.meal-cat-label-th { width: 80px; }
+.meal-cat-label { width: 80px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.meal-day-th {
+  text-align: center; color: var(--muted); font-size: 11px;
+  font-weight: 700; letter-spacing: .04em; min-width: 72px;
+}
+.meal-cell-input {
+  width: 100%; padding: 6px 8px 6px 18px !important; border-radius: 7px;
+  background: var(--input-bg); border: 1px solid var(--line); color: var(--text);
+  font-size: 14px; text-align: right; font-variant-numeric: tabular-nums;
+  -moz-appearance: textfield;
+}
+.meal-cell-input::-webkit-outer-spin-button,
+.meal-cell-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.meal-cell-input:focus { border-color: var(--accent); outline: none; }
+.meal-cell-input::placeholder { color: var(--muted); opacity: .5; }
+
+.meal-totals-row td { border-top: 1px solid var(--line) !important; font-weight: 600; }
+.meal-day-total { text-align: right; font-variant-numeric: tabular-nums; font-size: 12px; color: var(--accent); }
+
+@media (max-width: 820px) {
+  .meal-detail-wrap { padding: 8px; }
+  .meal-cat-label, .meal-cat-label-th { width: 64px; }
+  .meal-day-th, .meal-detail-table td { font-size: 11px; padding: 5px 5px; }
+  .meal-cell-input { font-size: 14px; padding: 5px 6px 5px 16px !important; }
+}

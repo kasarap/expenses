@@ -46,7 +46,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '63-tracker-fixes';
+const APP_VERSION = '64-meal-tracker';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
@@ -1373,7 +1373,9 @@ async function init(){
   // Tab switching
   el('tabBtn1').addEventListener('click', ()=> switchTab(1));
   el('tabBtn2').addEventListener('click', ()=> switchTab(2));
+  el('tabBtn3').addEventListener('click', ()=> switchTab(3));
   el('btnCopyUnpaid').addEventListener('click', copyUnpaidReports);
+  el('btnAddMealWeek').addEventListener('click', addMealWeek);
 
   // Line-item modal
   el('modalCloseBtn').addEventListener('click', closeLineItemModal);
@@ -1552,6 +1554,8 @@ async function renderTracker(){
 
     // Owe = sent but not paid
     if (isSent && !isPaid) oweTotal += total;
+    // Total unpaid = not paid at all (includes unsent)
+    if (!isPaid) unpaidTotal += total;
 
     const tr = document.createElement('tr');
     tr.className = isPaid ? 'tr-paid' : '';
@@ -1703,7 +1707,332 @@ function switchTab(n){
   activeTab = n;
   el('tab1Content').style.display = n === 1 ? '' : 'none';
   el('tab2Content').style.display = n === 2 ? '' : 'none';
+  el('tab3Content').style.display = n === 3 ? '' : 'none';
   el('tabBtn1').classList.toggle('tab-active', n === 1);
   el('tabBtn2').classList.toggle('tab-active', n === 2);
+  el('tabBtn3').classList.toggle('tab-active', n === 3);
   if (n === 2) renderTracker();
+  if (n === 3) renderMealTracker();
+}
+
+// ==================== MEAL TRACKER (Tab 3) ====================
+// Data shape stored in localStorage under key `meal_tracker:{sync}`:
+// { weeks: [ { id, sundayISO, days: [{breakfast,lunch,dinner}, x7], paid } ] }
+// sundayISO = YYYY-MM-DD of the Sunday starting that week.
+
+const MEAL_CATS = ['breakfast','lunch','dinner'];
+
+function mealStorageKey(){
+  return `meal_tracker:${currentSync||'__local__'}`;
+}
+
+function loadMealData(){
+  try{
+    const raw = localStorage.getItem(mealStorageKey());
+    const d = raw ? JSON.parse(raw) : {};
+    if (!Array.isArray(d.weeks)) d.weeks = [];
+    return d;
+  } catch { return {weeks:[]}; }
+}
+
+function saveMealData(data){
+  localStorage.setItem(mealStorageKey(), JSON.stringify(data));
+}
+
+function mealWeekLabel(sundayISO){
+  // "Week M-D through M-D" using Sunday and the following Saturday
+  const sun = parseISODate(sundayISO);
+  const sat = new Date(sun); sat.setDate(sat.getDate()+6);
+  const fmt = d => `${d.getMonth()+1}-${d.getDate()}`;
+  return `Week ${fmt(sun)} through ${fmt(sat)}`;
+}
+
+function mealDayLabel(sundayISO, dayIdx){
+  // Full date label for a day column header: "Sun M/D"
+  const sun = parseISODate(sundayISO);
+  const d = new Date(sun); d.setDate(d.getDate()+dayIdx);
+  const dows = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  return `${dows[dayIdx]}<br><span style="font-size:10px;opacity:.7">${d.getMonth()+1}/${d.getDate()}</span>`;
+}
+
+function mealCatTotal(days, cat){
+  return days.reduce((s,d)=> s + (Number(d[cat])||0), 0);
+}
+
+function mealWeekTotal(days){
+  return MEAL_CATS.reduce((s,cat)=> s + mealCatTotal(days,cat), 0);
+}
+
+function fmtMoney(n){
+  if (!n) return '';
+  return '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+
+function renderMealTracker(){
+  const body = el('mealBody');
+  const summary = el('mealSummary');
+  const data = loadMealData();
+  const weeks = data.weeks;
+
+  if (!weeks.length){
+    body.innerHTML = '<tr><td colspan="7" class="tr-empty">No weeks yet — click + Add Week.</td></tr>';
+    summary.innerHTML = '';
+    return;
+  }
+
+  body.innerHTML = '';
+
+  let oweTotal = 0;
+  let spentTotal = 0;
+  const currentYear = new Date().getFullYear();
+
+  for (const week of weeks){
+    const wTotal = mealWeekTotal(week.days);
+    const isPaid = !!week.paid;
+    const label = mealWeekLabel(week.sundayISO);
+
+    const yr = parseInt((week.sundayISO||'').slice(0,4),10);
+    if (yr === currentYear) spentTotal += wTotal;
+    if (!isPaid) oweTotal += wTotal;
+
+    // Summary row (collapsed)
+    const tr = document.createElement('tr');
+    tr.className = isPaid ? 'tr-paid' : '';
+    tr.dataset.wid = week.id;
+    tr.style.cursor = 'pointer';
+
+    const bTotal = mealCatTotal(week.days,'breakfast');
+    const lTotal = mealCatTotal(week.days,'lunch');
+    const dTotal = mealCatTotal(week.days,'dinner');
+
+    tr.innerHTML = `
+      <td class="tr-name-cell meal-expand-btn" title="Click to expand/edit">
+        <span class="meal-chevron">▶</span> ${escHtml(label)}
+      </td>
+      <td class="tr-total-cell">${fmtMoney(bTotal)}</td>
+      <td class="tr-total-cell">${fmtMoney(lTotal)}</td>
+      <td class="tr-total-cell">${fmtMoney(dTotal)}</td>
+      <td class="tr-total-cell"><strong>${fmtMoney(wTotal)||'$0.00'}</strong></td>
+      <td class="tr-date-cell">
+        <input type="date" class="meal-paid" value="${escHtml(week.paid||'')}"
+          aria-label="Paid date for ${escHtml(label)}">
+      </td>
+      <td class="tr-act-cell">
+        <button class="meal-del-btn" title="Delete week" type="button">✕</button>
+      </td>
+    `;
+
+    // Expand/collapse detail row
+    tr.querySelector('.meal-expand-btn').addEventListener('click', ()=> toggleMealDetail(week.id, tr, week));
+
+    // Paid date
+    tr.querySelector('.meal-paid').addEventListener('change', function(e){
+      e.stopPropagation();
+      const d2 = loadMealData();
+      const w2 = d2.weeks.find(w=>w.id===week.id);
+      if (w2){ w2.paid = this.value; saveMealData(d2); }
+      renderMealTracker();
+    });
+
+    // Delete
+    tr.querySelector('.meal-del-btn').addEventListener('click', function(e){
+      e.stopPropagation();
+      if (!confirm(`Delete "${label}"?`)) return;
+      const d2 = loadMealData();
+      d2.weeks = d2.weeks.filter(w=>w.id!==week.id);
+      saveMealData(d2);
+      renderMealTracker();
+    });
+
+    body.appendChild(tr);
+  }
+
+  // Summary
+  const currentYearPrev = currentYear - 1;
+  const prevKey = `__meal_prevYear__${currentYearPrev}`;
+  const prevVal = data[prevKey] !== undefined ? data[prevKey] : '';
+
+  summary.innerHTML = `
+    <div class="tracker-sum-row sum-owe">
+      <span class="tracker-sum-label">Owe (unpaid)</span>
+      <span class="tracker-sum-value">$${oweTotal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+    </div>
+    <div class="tracker-sum-row sum-spent">
+      <span class="tracker-sum-label">Spent ${currentYear}</span>
+      <span class="tracker-sum-value">$${spentTotal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+    </div>
+    <div class="tracker-sum-row">
+      <span class="tracker-sum-label">${currentYearPrev} Spend</span>
+      <input type="number" class="tracker-sum-prev-input" id="mealPrevYearInput"
+        value="${escHtml(prevVal)}" placeholder="0.00" step="0.01" min="0"
+        aria-label="${currentYearPrev} meal spend total">
+    </div>
+  `;
+  el('mealPrevYearInput').addEventListener('change', function(){
+    const d2 = loadMealData();
+    d2[prevKey] = this.value;
+    saveMealData(d2);
+  });
+}
+
+// Expand a week into a detail grid (7 days × 3 categories)
+function toggleMealDetail(wid, summaryTr, week){
+  // If already expanded, collapse
+  const existingDetail = document.getElementById(`meal-detail-${wid}`);
+  if (existingDetail){
+    existingDetail.remove();
+    summaryTr.querySelector('.meal-chevron').textContent = '▶';
+    return;
+  }
+  summaryTr.querySelector('.meal-chevron').textContent = '▼';
+
+  const detailTr = document.createElement('tr');
+  detailTr.id = `meal-detail-${wid}`;
+  detailTr.className = 'meal-detail-row';
+
+  // Build inner table: rows = categories, cols = days
+  const dayLabels = Array.from({length:7},(_,i)=> mealDayLabel(week.sundayISO, i));
+
+  let dayHeaderCells = dayLabels.map(l=>`<th class="meal-day-th">${l}</th>`).join('');
+  let rows = MEAL_CATS.map(cat => {
+    const label = cat.charAt(0).toUpperCase()+cat.slice(1);
+    const cells = week.days.map((day,di)=>{
+      const val = day[cat] || '';
+      return `<td><div class="currency-wrap" style="min-width:70px">
+        <input type="number" class="meal-cell-input" step="0.01" min="0"
+          data-wid="${wid}" data-day="${di}" data-cat="${cat}"
+          value="${val}" placeholder="0">
+      </div></td>`;
+    }).join('');
+    return `<tr><td class="meal-cat-label">${label}</td>${cells}</tr>`;
+  }).join('');
+
+  // Day totals row
+  const dayTotals = week.days.map(day =>
+    MEAL_CATS.reduce((s,c)=>s+(Number(day[c])||0),0)
+  );
+  const dayTotalCells = dayTotals.map(t=>
+    `<td class="meal-day-total">${fmtMoney(t)}</td>`
+  ).join('');
+
+  detailTr.innerHTML = `
+    <td colspan="7" style="padding:0">
+      <div class="meal-detail-wrap">
+        <table class="meal-detail-table">
+          <thead>
+            <tr>
+              <th class="meal-cat-label-th"></th>
+              ${dayHeaderCells}
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+            <tr class="meal-totals-row">
+              <td class="meal-cat-label" style="color:var(--muted);font-size:11px">Total</td>
+              ${dayTotalCells}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </td>
+  `;
+
+  summaryTr.insertAdjacentElement('afterend', detailTr);
+
+  // Wire inputs
+  detailTr.querySelectorAll('.meal-cell-input').forEach(inp => {
+    inp.addEventListener('change', function(){
+      const d2 = loadMealData();
+      const w2 = d2.weeks.find(w=>w.id===this.dataset.wid);
+      if (!w2) return;
+      const di = parseInt(this.dataset.day);
+      const cat = this.dataset.cat;
+      const val = Number(this.value) || 0;
+      w2.days[di][cat] = val || undefined;
+      saveMealData(d2);
+      // Update day total cell in detail table
+      const dayIdx = di;
+      const dayTotal = MEAL_CATS.reduce((s,c)=>s+(Number(w2.days[dayIdx][c])||0),0);
+      const totalCells = detailTr.querySelectorAll('.meal-day-total');
+      if (totalCells[dayIdx]) totalCells[dayIdx].textContent = fmtMoney(dayTotal) || '';
+      // Update summary row totals without full re-render
+      const bT = mealCatTotal(w2.days,'breakfast');
+      const lT = mealCatTotal(w2.days,'lunch');
+      const dT = mealCatTotal(w2.days,'dinner');
+      const wT = bT+lT+dT;
+      const cells = summaryTr.querySelectorAll('.tr-total-cell');
+      if (cells[0]) cells[0].textContent = fmtMoney(bT);
+      if (cells[1]) cells[1].textContent = fmtMoney(lT);
+      if (cells[2]) cells[2].textContent = fmtMoney(dT);
+      if (cells[3]) cells[3].innerHTML = `<strong>${fmtMoney(wT)||'$0.00'}</strong>`;
+      // Recalc summary footer
+      renderMealSummaryOnly();
+    });
+  });
+}
+
+function renderMealSummaryOnly(){
+  const data = loadMealData();
+  const currentYear = new Date().getFullYear();
+  let oweTotal = 0, spentTotal = 0;
+  for (const week of data.weeks){
+    const wT = mealWeekTotal(week.days);
+    const yr = parseInt((week.sundayISO||'').slice(0,4),10);
+    if (yr === currentYear) spentTotal += wT;
+    if (!week.paid) oweTotal += wT;
+  }
+  const currentYearPrev = currentYear - 1;
+  const prevKey = `__meal_prevYear__${currentYearPrev}`;
+  const prevVal = data[prevKey] !== undefined ? data[prevKey] : '';
+
+  el('mealSummary').innerHTML = `
+    <div class="tracker-sum-row sum-owe">
+      <span class="tracker-sum-label">Owe (unpaid)</span>
+      <span class="tracker-sum-value">$${oweTotal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+    </div>
+    <div class="tracker-sum-row sum-spent">
+      <span class="tracker-sum-label">Spent ${currentYear}</span>
+      <span class="tracker-sum-value">$${spentTotal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+    </div>
+    <div class="tracker-sum-row">
+      <span class="tracker-sum-label">${currentYearPrev} Spend</span>
+      <input type="number" class="tracker-sum-prev-input" id="mealPrevYearInput"
+        value="${escHtml(prevVal)}" placeholder="0.00" step="0.01" min="0">
+    </div>
+  `;
+  el('mealPrevYearInput').addEventListener('change', function(){
+    const d2 = loadMealData();
+    d2[prevKey] = this.value;
+    saveMealData(d2);
+  });
+}
+
+function addMealWeek(){
+  // Prompt for Sunday date, defaulting to the most recent Sunday
+  const today = new Date();
+  const dayOfWeek = today.getDay(); // 0=Sun
+  const sun = new Date(today); sun.setDate(today.getDate() - dayOfWeek);
+  const defaultSun = toISODate(sun);
+
+  const input = prompt('Enter Sunday date for the new week (YYYY-MM-DD):', defaultSun);
+  if (!input) return;
+  // Validate
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.trim())){
+    alert('Invalid date format. Use YYYY-MM-DD.');
+    return;
+  }
+  const sundayISO = input.trim();
+  const data = loadMealData();
+  // Check for duplicate
+  if (data.weeks.find(w=>w.sundayISO===sundayISO)){
+    alert('That week already exists.');
+    return;
+  }
+  const id = `mw_${Date.now()}`;
+  const days = Array.from({length:7},()=>({breakfast:undefined,lunch:undefined,dinner:undefined}));
+  data.weeks.unshift({ id, sundayISO, days, paid:'' });
+  // Sort newest first
+  data.weeks.sort((a,b)=>b.sundayISO.localeCompare(a.sundayISO));
+  saveMealData(data);
+  renderMealTracker();
 }

@@ -27,6 +27,7 @@
   <div class="tab-bar">
     <button class="tab-btn tab-active" id="tabBtn1" type="button">Expense Entry</button>
     <button class="tab-btn" id="tabBtn2" type="button">Payment Tracker</button>
+    <button class="tab-btn" id="tabBtn3" type="button">Meal Tracker</button>
   </div>
 
   <!-- TAB 1: Expense Entry -->
@@ -143,6 +144,37 @@
         </table>
       </div>
       <div class="tracker-summary" id="trackerSummary"></div>
+    </section>
+  </main>
+
+
+  <!-- TAB 3: Meal Tracker -->
+  <main class="wrap" id="tab3Content" style="display:none;">
+    <section class="card">
+      <div class="tracker-header">
+        <h2>Meal Tracker</h2>
+        <button id="btnAddMealWeek" class="primary" type="button">+ Add Week</button>
+      </div>
+      <p class="hint" style="margin-top:0;margin-bottom:12px;">Independent reimbursement tracker — saved locally, not exported.</p>
+      <div class="tracker-table-wrap">
+        <table class="tracker-table" id="mealTable">
+          <thead>
+            <tr>
+              <th class="tr-name">Week</th>
+              <th class="tr-total">Breakfast</th>
+              <th class="tr-total">Lunch</th>
+              <th class="tr-total">Dinner</th>
+              <th class="tr-total">Total</th>
+              <th class="tr-date">Paid</th>
+              <th class="tr-act"></th>
+            </tr>
+          </thead>
+          <tbody id="mealBody">
+            <tr><td colspan="7" class="tr-empty">No weeks yet — click + Add Week.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="tracker-summary" id="mealSummary"></div>
     </section>
   </main>
 
