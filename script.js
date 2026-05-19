@@ -46,7 +46,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '60-v2-occ';
+const APP_VERSION = '62-payment-tracker';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
@@ -867,6 +867,7 @@ async function loadWeeksForSync(autoLoadMostRecent=true){
     const most = reportsCache[0];
     await loadReport(most);
   }
+  if (activeTab === 2) renderTracker();
 }
 
 async function loadReport(meta){
@@ -981,6 +982,7 @@ async function performAutosave(){
     });
     renderWeeksDropdown();
     setStatus('Saved ✓');
+    cacheCurrentReportTotal();
   } catch(e){
     if (e && e.status === 409){
       // Another device wrote a newer version. Stop autosaving until the user
@@ -1368,6 +1370,11 @@ async function init(){
   el('btnDownload').addEventListener('click', downloadExcel);
   el('btnChangeSync').addEventListener('click', changeSync);
 
+  // Tab switching
+  el('tabBtn1').addEventListener('click', ()=> switchTab(1));
+  el('tabBtn2').addEventListener('click', ()=> switchTab(2));
+  el('btnCopyUnpaid').addEventListener('click', copyUnpaidReports);
+
   // Line-item modal
   el('modalCloseBtn').addEventListener('click', closeLineItemModal);
   el('modalSaveBtn').addEventListener('click', closeLineItemModal);
@@ -1422,3 +1429,277 @@ async function init(){
 }
 
 init();
+
+// ==================== PAYMENT TRACKER (Tab 2) ====================
+
+// localStorage key for tracker data (sent/paid dates + prev-year amounts)
+function trackerStorageKey(){
+  return `tracker:${currentSync}`;
+}
+
+// Load tracker data object: { "weekEnding:reportId": {sent, paid}, "__prevYear__2025": "41307.52" }
+function loadTrackerData(){
+  if (!currentSync) return {};
+  try{
+    const raw = localStorage.getItem(trackerStorageKey());
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+
+function saveTrackerData(data){
+  if (!currentSync) return;
+  localStorage.setItem(trackerStorageKey(), JSON.stringify(data));
+}
+
+// Cache of report totals: "weekEnding:reportId" → number
+const reportTotalsCache = {};
+
+// Store the current report's total whenever autosave fires (called from performAutosave).
+function cacheCurrentReportTotal(){
+  if (!currentWeekEnding || !currentReportId) return;
+  const weekTotal = parseFloat((el('totWEEK').value || '').replace(/[$,]/g,'')) || 0;
+  reportTotalsCache[`${currentWeekEnding}:${currentReportId}`] = weekTotal;
+}
+
+// Format a report label matching the screenshot style
+// "Week M-D through M-D - Business Purpose"
+function trackerReportLabel(r){
+  const we = parseISODate(r.weekEnding); // Saturday
+  const sun = computeSundayFromWeekEnding(r.weekEnding);
+  const sunMD = `${sun.getMonth()+1}-${sun.getDate()}`;
+  const satMD = `${we.getMonth()+1}-${we.getDate()}`;
+  const bp = (r.businessPurpose || '').trim() || 'Untitled';
+  return `Week ${sunMD} through ${satMD} - ${bp}`;
+}
+
+// Fetch a report's total from the API (used when not already cached)
+async function fetchReportTotal(r){
+  const key = r.legacy ? `legacy:${r.weekEnding}` : `${r.weekEnding}:${r.reportId}`;
+  if (reportTotalsCache[key] !== undefined) return reportTotalsCache[key];
+  try{
+    const qs = new URLSearchParams({ sync: currentSync, weekEnding: r.weekEnding });
+    if (r.reportId) qs.set('reportId', r.reportId);
+    const out = await apiFetchJson(`${API.data}?${qs.toString()}`);
+    const data = out.data;
+    if (!data || !data.entries) { reportTotalsCache[key] = 0; return 0; }
+    // Compute total from entries
+    let total = 0;
+    const entries = data.entries;
+    const mileageKey = `${data.weekEnding}:mileage`; // not used; compute directly
+    rows.forEach(rowDef => {
+      if (!rowDef.row || rowDef.type !== 'currency' || rowDef.computed) return;
+      dayCols.forEach(col => {
+        const addr = `${col}${rowDef.row}`;
+        const items = entries[`${addr}_items`];
+        if (Array.isArray(items) && items.length > 0){
+          total += items.reduce((s, it)=> s + (Number(it.amount)||0), 0);
+        } else if (entries[addr] != null){
+          total += Number(entries[addr]) || 0;
+        }
+      });
+    });
+    // Add mileage (row 29, computed = miles * rate)
+    dayCols.forEach(col => {
+      const milesAddr = `${col}10`;
+      const miles = Number(entries[milesAddr]) || 0;
+      if (miles > 0) total += miles * MILEAGE_RATE;
+    });
+    reportTotalsCache[key] = total;
+    return total;
+  } catch { reportTotalsCache[key] = 0; return 0; }
+}
+
+// Render the tracker table
+async function renderTracker(){
+  const body = el('trackerBody');
+  const summary = el('trackerSummary');
+  if (!currentSync){
+    body.innerHTML = '<tr><td colspan="4" class="tr-empty">No sync set — go to Expense Entry tab first.</td></tr>';
+    summary.innerHTML = '';
+    return;
+  }
+  if (!reportsCache.length){
+    body.innerHTML = '<tr><td colspan="4" class="tr-empty">No reports found.</td></tr>';
+    summary.innerHTML = '';
+    return;
+  }
+
+  body.innerHTML = '<tr><td colspan="4" class="tr-empty">Loading totals…</td></tr>';
+  const trackerData = loadTrackerData();
+
+  // Sort reports: newest week first, then by reportId within week
+  const sorted = [...reportsCache].sort((a,b) => b.weekEnding.localeCompare(a.weekEnding));
+
+  // Fetch all totals
+  await Promise.all(sorted.map(r => fetchReportTotal(r)));
+
+  body.innerHTML = '';
+  let oweTotal = 0;
+  let spentTotal = 0;
+  const currentYear = new Date().getFullYear();
+
+  for (const r of sorted){
+    const rKey = r.legacy ? `legacy:${r.weekEnding}` : `${r.weekEnding}:${r.reportId}`;
+    const td = trackerData[rKey] || {};
+    const total = reportTotalsCache[rKey] || 0;
+    const label = trackerReportLabel(r);
+    const isPaid = !!td.paid;
+    const isSent = !!td.sent;
+
+    // Spent = any report for the current year
+    const reportYear = parseInt((r.weekEnding || '').slice(0,4), 10);
+    if (reportYear === currentYear) spentTotal += total;
+
+    // Owe = sent but not paid
+    if (isSent && !isPaid) oweTotal += total;
+
+    const tr = document.createElement('tr');
+    tr.className = isPaid ? 'tr-paid' : '';
+    tr.dataset.rkey = rKey;
+    tr.innerHTML = `
+      <td class="tr-name-cell">${escHtml(label)}</td>
+      <td class="tr-total-cell">$${total.toFixed(2)}</td>
+      <td class="tr-date-cell"><input type="date" class="tracker-sent" value="${escHtml(td.sent||'')}" aria-label="Sent date for ${escHtml(label)}"></td>
+      <td class="tr-date-cell"><input type="date" class="tracker-paid" value="${escHtml(td.paid||'')}" aria-label="Paid date for ${escHtml(label)}"></td>
+    `;
+
+    // Events for date inputs
+    tr.querySelector('.tracker-sent').addEventListener('change', function(){
+      saveTrackerDate(rKey, 'sent', this.value);
+    });
+    tr.querySelector('.tracker-paid').addEventListener('change', function(){
+      saveTrackerDate(rKey, 'paid', this.value);
+      // toggle strikethrough immediately
+      if (this.value){
+        tr.classList.add('tr-paid');
+        tr.querySelector('.tr-name-cell').style.textDecoration='line-through';
+      } else {
+        tr.classList.remove('tr-paid');
+        tr.querySelector('.tr-name-cell').style.textDecoration='';
+      }
+      recalcSummary();
+    });
+
+    body.appendChild(tr);
+  }
+
+  renderTrackerSummary(oweTotal, spentTotal, trackerData);
+}
+
+function escHtml(s){
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function saveTrackerDate(rKey, field, value){
+  const data = loadTrackerData();
+  if (!data[rKey]) data[rKey] = {};
+  data[rKey][field] = value;
+  saveTrackerData(data);
+}
+
+function renderTrackerSummary(oweTotal, spentTotal, trackerData){
+  const prevYearKey = `__prevYear__${new Date().getFullYear()-1}`;
+  const prevVal = trackerData[prevYearKey] || '';
+  el('trackerSummary').innerHTML = `
+    <div class="tracker-sum-row sum-owe">
+      <span class="tracker-sum-label">Owe (sent, not yet paid)</span>
+      <span class="tracker-sum-value">$${oweTotal.toFixed(2)}</span>
+    </div>
+    <div class="tracker-sum-row sum-spent">
+      <span class="tracker-sum-label">Spent ${new Date().getFullYear()}</span>
+      <span class="tracker-sum-value">$${spentTotal.toFixed(2)}</span>
+    </div>
+    <div class="tracker-sum-row">
+      <span class="tracker-sum-label tracker-sum-prev-year">
+        <span>${new Date().getFullYear()-1} Spend</span>
+      </span>
+      <input type="number" class="tracker-sum-prev-input" id="prevYearInput"
+        value="${escHtml(prevVal)}" placeholder="0.00" step="0.01" min="0"
+        aria-label="${new Date().getFullYear()-1} spend total">
+    </div>
+  `;
+  el('prevYearInput').addEventListener('change', function(){
+    const data = loadTrackerData();
+    data[prevYearKey] = this.value;
+    saveTrackerData(data);
+  });
+}
+
+function recalcSummary(){
+  // Re-read rows from DOM to recalc owe without full re-render
+  const trackerData = loadTrackerData();
+  let oweTotal = 0;
+  let spentTotal = 0;
+  const currentYear = new Date().getFullYear();
+  document.querySelectorAll('#trackerBody tr[data-rkey]').forEach(tr => {
+    const rKey = tr.dataset.rkey;
+    const sentVal = tr.querySelector('.tracker-sent').value;
+    const paidVal = tr.querySelector('.tracker-paid').value;
+    const total = parseFloat((tr.querySelector('.tr-total-cell')||{}).textContent?.replace('$','')) || 0;
+    // Determine year from rKey
+    const weekEnding = rKey.startsWith('legacy:') ? rKey.slice(7) : rKey.split(':')[0];
+    const reportYear = parseInt((weekEnding||'').slice(0,4), 10);
+    if (reportYear === currentYear) spentTotal += total;
+    if (sentVal && !paidVal) oweTotal += total;
+  });
+  renderTrackerSummary(oweTotal, spentTotal, trackerData);
+}
+
+// Copy unpaid reports as plain text for email
+function copyUnpaidReports(){
+  const lines = [];
+  document.querySelectorAll('#trackerBody tr[data-rkey]').forEach(tr => {
+    const sentVal = tr.querySelector('.tracker-sent').value;
+    const paidVal = tr.querySelector('.tracker-paid').value;
+    if (!sentVal || paidVal) return; // only sent-not-paid
+    const name = (tr.querySelector('.tr-name-cell')||{}).textContent?.trim() || '';
+    const totalText = (tr.querySelector('.tr-total-cell')||{}).textContent?.trim() || '';
+    // Format sent date as M/D/YYYY
+    const sentParts = sentVal.split('-');
+    const sentFmt = sentParts.length === 3
+      ? `${parseInt(sentParts[1])}/${parseInt(sentParts[2])}/${sentParts[0]}`
+      : sentVal;
+    lines.push(`${name} - ${totalText} - Sent ${sentFmt}`);
+  });
+  if (!lines.length){
+    alert('No unpaid (sent, not paid) reports found.');
+    return;
+  }
+  const text = lines.join('\n');
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(()=>{
+      const btn = el('btnCopyUnpaid');
+      const orig = btn.textContent;
+      btn.textContent = '✓ Copied!';
+      setTimeout(()=>{ btn.textContent = orig; }, 2000);
+    }).catch(()=> fallbackCopy(text));
+  } else {
+    fallbackCopy(text);
+  }
+}
+function fallbackCopy(text){
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  ta.remove();
+  const btn = el('btnCopyUnpaid');
+  const orig = btn.textContent;
+  btn.textContent = '✓ Copied!';
+  setTimeout(()=>{ btn.textContent = orig; }, 2000);
+}
+
+// ==================== TAB SWITCHING ====================
+let activeTab = 1;
+
+function switchTab(n){
+  activeTab = n;
+  el('tab1Content').style.display = n === 1 ? '' : 'none';
+  el('tab2Content').style.display = n === 2 ? '' : 'none';
+  el('tabBtn1').classList.toggle('tab-active', n === 1);
+  el('tabBtn2').classList.toggle('tab-active', n === 2);
+  if (n === 2) renderTracker();
+}

@@ -23,7 +23,14 @@
     </div>
   </header>
 
-  <main class="wrap">
+  <!-- TAB BAR -->
+  <div class="tab-bar">
+    <button class="tab-btn tab-active" id="tabBtn1" type="button">Expense Entry</button>
+    <button class="tab-btn" id="tabBtn2" type="button">Payment Tracker</button>
+  </div>
+
+  <!-- TAB 1: Expense Entry -->
+  <main class="wrap" id="tab1Content">
     <section class="card">
       <h2>Week</h2>
       <div class="grid3">
@@ -109,6 +116,33 @@
           </div>
         </div>
       </div>
+    </section>
+  </main>
+
+  <!-- TAB 2: Payment Tracker -->
+  <main class="wrap" id="tab2Content" style="display:none;">
+    <section class="card">
+      <div class="tracker-header">
+        <h2>Payment Tracker</h2>
+        <button id="btnCopyUnpaid" class="ghost" type="button">📋 Copy Unpaid</button>
+      </div>
+      <p class="hint" style="margin-top:0;margin-bottom:12px;">Sent &amp; Paid dates are saved locally — not exported to Excel.</p>
+      <div class="tracker-table-wrap">
+        <table class="tracker-table" id="trackerTable">
+          <thead>
+            <tr>
+              <th class="tr-name">Expense Report</th>
+              <th class="tr-total">Total</th>
+              <th class="tr-date">Sent</th>
+              <th class="tr-date">Paid</th>
+            </tr>
+          </thead>
+          <tbody id="trackerBody">
+            <tr><td colspan="4" class="tr-empty">No sync set — go to Expense Entry tab.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="tracker-summary" id="trackerSummary"></div>
     </section>
   </main>
 

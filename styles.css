@@ -447,3 +447,97 @@ input.computed{opacity:.85}
   .modal-save-btn{width:100%;padding:14px !important;font-size:15px !important}
   .modal-add-btn{padding:12px 16px !important;font-size:15px !important}
 }
+
+/* ============================================================ */
+/* TAB BAR                                                       */
+/* ============================================================ */
+
+.tab-bar{
+  display:flex;gap:0;
+  border-bottom:1px solid var(--line);
+  background:#0e1218;
+  padding:0 16px;
+  position:sticky;top:57px;z-index:9;
+}
+.tab-btn{
+  background:transparent;border:none;border-bottom:2px solid transparent;
+  color:var(--muted);padding:10px 16px;font-size:14px;font-weight:600;
+  cursor:pointer;border-radius:0;letter-spacing:.02em;
+  transition:color .15s,border-color .15s;
+}
+.tab-btn:hover{color:var(--text)}
+.tab-btn.tab-active{color:var(--accent);border-bottom-color:var(--accent)}
+
+/* ============================================================ */
+/* PAYMENT TRACKER TAB                                           */
+/* ============================================================ */
+
+.tracker-header{
+  display:flex;justify-content:space-between;align-items:center;
+  margin-bottom:12px;flex-wrap:wrap;gap:8px;
+}
+.tracker-header h2{margin:0}
+
+.tracker-table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px}
+.tracker-table{
+  width:100%;border-collapse:separate;border-spacing:0;
+  min-width:500px;
+}
+.tracker-table thead th{
+  background:#0e1218;color:var(--muted);font-size:12px;font-weight:700;
+  letter-spacing:.05em;text-transform:uppercase;padding:10px 12px;
+  border-bottom:1px solid var(--line);
+  position:sticky;top:0;
+}
+.tracker-table tbody tr:last-child td{border-bottom:none}
+.tracker-table tbody td{
+  padding:9px 12px;font-size:13px;border-bottom:1px solid var(--line);
+  vertical-align:middle;
+}
+.tracker-table tbody tr.tr-paid td{opacity:.55}
+.tracker-table tbody tr.tr-paid .tr-name-cell{text-decoration:line-through}
+
+th.tr-name,.tracker-table td.tr-name-cell{min-width:220px}
+th.tr-total,.tracker-table td.tr-total-cell{
+  width:90px;text-align:right;font-variant-numeric:tabular-nums;
+}
+th.tr-date,.tracker-table td.tr-date-cell{width:130px}
+
+.tracker-table td.tr-date-cell input[type="date"]{
+  padding:6px 8px;font-size:14px;border-radius:8px;
+  border:1px solid var(--line);background:var(--input-bg);color:var(--text);
+  width:100%;-webkit-appearance:none;appearance:none;
+}
+.tracker-table td.tr-date-cell input[type="date"]:focus{border-color:var(--accent);outline:none}
+
+.tr-empty{text-align:center;color:var(--muted);padding:24px;font-size:13px}
+
+.tracker-summary{
+  margin-top:14px;border:1px solid var(--line);border-radius:12px;
+  background:var(--input-bg);overflow:hidden;
+}
+.tracker-sum-row{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:10px 14px;border-bottom:1px solid var(--line);font-size:14px;
+}
+.tracker-sum-row:last-child{border-bottom:none}
+.tracker-sum-label{color:var(--muted);font-size:13px}
+.tracker-sum-value{font-weight:700;font-variant-numeric:tabular-nums;font-size:15px}
+.tracker-sum-row.sum-owe .tracker-sum-value{color:var(--danger)}
+.tracker-sum-row.sum-spent .tracker-sum-value{color:var(--accent)}
+.tracker-sum-prev-year{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+}
+.tracker-sum-prev-input{
+  width:120px;padding:5px 8px;font-size:14px;border-radius:8px;
+  border:1px solid var(--line);background:var(--input-bg);color:var(--text);
+  text-align:right;font-variant-numeric:tabular-nums;
+}
+.tracker-sum-prev-input:focus{border-color:var(--accent);outline:none}
+
+@media (max-width:820px){
+  .tab-bar{top:53px;padding:0 10px}
+  .tab-btn{padding:9px 12px;font-size:13px}
+  th.tr-name,.tracker-table td.tr-name-cell{min-width:160px}
+  th.tr-date,.tracker-table td.tr-date-cell{width:110px}
+}

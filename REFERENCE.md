@@ -5,7 +5,7 @@ handoff document — Claude should be able to plan changes from this file
 alone, without the zip attached.
 
 Deployed target: `https://exp.jonmercado.com/` (Cloudflare Pages + KV).
-Current `APP_VERSION` constant: `60-v2-occ`.
+Current `APP_VERSION` constant: `62-payment-tracker`.
 
 ---
 
@@ -31,7 +31,9 @@ Current `APP_VERSION` constant: `60-v2-occ`.
    bundled zip, duplicate `.currency-wrap` CSS. Consolidated color
    tokens into `:root` (`--success`, `--accent-weak`, `--input-bg`).
 
-5. **Optimistic concurrency control (OCC) — `60-v2-occ`.** Prevents
+5. **Payment Tracker tab (`62-payment-tracker`).** Two tabs added (tab bar sticky below the main bar). Tab 1 = existing expense entry. Tab 2 = Payment Tracker: lists all reports from `reportsCache` with fetched/cached totals, Sent and Paid date inputs (stored in `localStorage` under key `tracker:{sync}`, never exported), Copy Unpaid button (generates text lines for unpaid reports suitable for pasting in an email), and a summary section with Owe (sent but not paid), Spent (current year total), and editable prior-year spend. Report totals are fetched on first open (all in parallel via `fetchReportTotal`) and cached in `reportTotalsCache` in-memory; they are also cached after each successful autosave via `cacheCurrentReportTotal`. Tracker re-renders when switching to tab 2 or after `loadWeeksForSync` completes while on tab 2.
+
+6. **Optimistic concurrency control (OCC) — `60-v2-occ`.** Prevents
    stale tabs (e.g. phone left open with empty fields) from clobbering
    edits made on another device. See "OCC / multi-device" below.
 
