@@ -756,3 +756,6 @@ th.tr-act, .tracker-table td.tr-act-cell { width: 36px; text-align: center; }
   .meal-day-input { width: 52px; font-size: 12px; }
   .mwc-table { min-width: 480px; }
 }
+
+.mwc-chevron { font-size: 11px; opacity: .7; margin-right: 5px; display: inline-block; transition: transform .12s; }
+.mwc-header:hover { background: rgba(255,255,255,.05); }

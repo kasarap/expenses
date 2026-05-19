@@ -46,7 +46,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '67-meal-per-day';
+const APP_VERSION = '70-meal-owe-complete-weeks';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
@@ -1767,15 +1767,23 @@ function fmtMoney(n){
 function roundUpTo5(n){ return Math.ceil(n / 5) * 5; }
 
 // Compute current owe = weeks added after the last payment date (or all if no payments)
+// Compute current owe = weeks that are fully complete (Saturday passed) AND after last payment date
 function computeMealOwe(data){
   const payments = [...data.payments].sort((a,b)=>a.date.localeCompare(b.date));
   const lastPayment = payments.length ? payments[payments.length-1] : null;
-  const cutoff = lastPayment ? lastPayment.date : null; // ISO date string
+  const cutoff = lastPayment ? lastPayment.date : null;
+
+  const todayISO = toISODate(new Date());
 
   let owe = 0;
   for (const week of data.weeks){
-    // A week "counts" if its Sunday is after the cutoff date
-    if (!cutoff || week.sundayISO > cutoff){
+    // Saturday = sundayISO + 6 days
+    const sun = parseISODate(week.sundayISO);
+    const sat = new Date(sun); sat.setDate(sat.getDate()+6);
+    const satISO = toISODate(sat);
+
+    // Only count if the week is fully done (Saturday has passed) AND started after last payment
+    if (satISO < todayISO && (!cutoff || week.sundayISO > cutoff)){
       owe += mealWeekTotal(week);
     }
   }
@@ -1804,24 +1812,30 @@ function renderMealTracker(){
   }
 
   // interleave weeks and payment dividers chronologically (newest first)
+  // Payment covers all weeks with sundayISO <= pmt.date
+  // Divider appears between the last uncovered week (sundayISO > pmt.date) and first covered week (sundayISO <= pmt.date)
   const pmtUsed = new Set();
 
   for (let i = 0; i < weeks.length; i++){
     const week = weeks[i];
     const nextWeek = weeks[i+1];
 
-    // Insert payments that fall between nextWeek and this week
+    body.appendChild(makeMealWeekCard(week, data));
+
+    // After appending this week, check if any payment falls between this week's Sunday and the next week's Sunday
+    // i.e. nextWeek.sundayISO < pmt.date <= week.sundayISO  → but since display is newest-first,
+    // payment goes here if this week is the LAST week covered (week.sundayISO >= pmt.date and (!nextWeek || nextWeek.sundayISO > pmt.date) is wrong)
+    // Simpler: payment divider goes between week[i] and week[i+1] when pmt.date is >= nextWeek.sundayISO and < week.sundayISO
+    // i.e. nextWeek is the first covered week, week[i] is the first uncovered week
     for (const pmt of payments){
       if (pmtUsed.has(pmt.id)) continue;
-      const afterNext = !nextWeek || pmt.date >= nextWeek.sundayISO;
-      const beforeThis = pmt.date < week.sundayISO;
-      if (afterNext && beforeThis){
+      const thisUncovered = week.sundayISO > pmt.date;
+      const nextCovered = !nextWeek || nextWeek.sundayISO <= pmt.date;
+      if (thisUncovered && nextCovered){
         pmtUsed.add(pmt.id);
         body.appendChild(makeMealPaymentDiv(pmt));
       }
     }
-
-    body.appendChild(makeMealWeekCard(week, data));
   }
 
   // Remaining payments older than all weeks
@@ -1886,8 +1900,8 @@ function makeMealWeekCard(week, data){
   ).join('');
 
   wrap.innerHTML = `
-    <div class="mwc-header">
-      <span class="mwc-label">${escHtml(label)}</span>
+    <div class="mwc-header" style="cursor:pointer;">
+      <span class="mwc-label"><span class="mwc-chevron">▾</span> ${escHtml(label)}</span>
       <div style="display:flex;align-items:center;gap:8px;">
         <span class="mwc-grand-total" data-wid="${week.id}">${fmtMoney(weekGrandTotal)||'$0.00'}</span>
         <button class="meal-del-btn" type="button" title="Delete week">✕</button>
@@ -1934,6 +1948,16 @@ function makeMealWeekCard(week, data){
       if(grandCell) grandCell.innerHTML=`<strong>${fmtMoney(grand)||'$0.00'}</strong>`;
       renderMealSummary(d2);
     });
+  });
+
+  // Toggle collapse on header click
+  wrap.querySelector('.mwc-header').addEventListener('click', function(e){
+    if (e.target.closest('.meal-del-btn')) return;
+    const tableWrap = wrap.querySelector('.mwc-table-wrap');
+    const chevron = wrap.querySelector('.mwc-chevron');
+    const collapsed = tableWrap.style.display === 'none';
+    tableWrap.style.display = collapsed ? '' : 'none';
+    chevron.textContent = collapsed ? '▾' : '▸';
   });
 
   wrap.querySelector('.meal-del-btn').addEventListener('click',function(){
