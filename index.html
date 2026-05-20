@@ -27,7 +27,8 @@
   <div class="tab-bar">
     <button class="tab-btn tab-active" id="tabBtn1" type="button">Expense Entry</button>
     <button class="tab-btn" id="tabBtn2" type="button">Payment Tracker</button>
-    <button class="tab-btn" id="tabBtn3" type="button">Meal Tracker</button>
+    <button class="tab-btn" id="tabBtn3" type="button">Mercado Reimbursement</button>
+    <button class="tab-btn" id="tabBtn4" type="button">Year Stats</button>
   </div>
 
   <!-- TAB 1: Expense Entry -->
@@ -152,14 +153,26 @@
   <main class="wrap" id="tab3Content" style="display:none;">
     <section class="card">
       <div class="tracker-header">
-        <h2>Meal Tracker</h2>
+        <h2>Mercado Reimbursement</h2>
         <button id="btnAddMealWeek" class="primary" type="button">+ Add Week</button>
       </div>
-      <p class="hint" style="margin-top:0;margin-bottom:12px;">Saved locally — not exported. One payment covers all owed at that date.</p>
+      <p class="hint" style="margin-top:0;margin-bottom:12px;">Saved locally — not exported. One payment covers all owed at that date. Weeks collapse — newest stays open.</p>
       <div id="mealBody">
         <p class="tr-empty" style="text-align:center;padding:24px 0;color:var(--muted);">No weeks yet — click + Add Week.</p>
       </div>
       <div class="tracker-summary" id="mealSummary"></div>
+    </section>
+  </main>
+
+  <!-- TAB 4: Year Stats -->
+  <main class="wrap" id="tab4Content" style="display:none;">
+    <section class="card">
+      <div class="tracker-header">
+        <h2>Year Stats</h2>
+        <select id="statsYearSelect" style="padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--input-bg);color:var(--text);font-size:14px;"></select>
+      </div>
+      <p class="hint" style="margin-top:0;margin-bottom:16px;">Aggregated from all expense reports in this sync.</p>
+      <div id="statsBody"><p style="text-align:center;color:var(--muted);padding:24px;">Loading…</p></div>
     </section>
   </main>
 

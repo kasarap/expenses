@@ -778,3 +778,45 @@ th.tr-act, .tracker-table td.tr-act-cell { width: 36px; text-align: center; }
 .paid-badge { background: rgba(0,200,120,.25); color: rgba(0,200,120,1); }
 .unpaid-badge { background: rgba(255,200,0,.2); color: rgba(255,200,0,.9); }
 .meal-pmt-text { font-size: 13px; font-weight: 600; color: rgba(0,200,120,.9); }
+
+/* ============================================================ */
+/* YEAR STATS (Tab 4)                                           */
+/* ============================================================ */
+
+.stats-summary-bar {
+  display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap;
+}
+.stats-big-stat {
+  flex: 1; min-width: 140px;
+  background: var(--input-bg); border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px 18px; display: flex; flex-direction: column; gap: 4px;
+}
+.stats-big-label { font-size: 11px; font-weight: 700; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+.stats-big-value { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--accent); }
+
+.stats-group { margin-bottom: 18px; }
+.stats-group-header {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 4px 0 8px; border-bottom: 1px solid var(--line); margin-bottom: 4px;
+}
+.stats-group-label { font-size: 12px; font-weight: 800; color: var(--muted); letter-spacing: .07em; text-transform: uppercase; }
+.stats-group-total { font-size: 13px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+
+.stats-rows { display: flex; flex-direction: column; }
+.stats-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 4px; border-bottom: 1px solid rgba(255,255,255,.04); gap: 12px;
+}
+.stats-row:last-child { border-bottom: none; }
+.stats-row-dim { opacity: .35; }
+.stats-row-label { font-size: 13px; color: var(--text); flex-shrink: 0; }
+.stats-row-right { display: flex; align-items: center; gap: 10px; }
+.stats-bar-wrap { width: 80px; height: 5px; background: rgba(255,255,255,.08); border-radius: 99px; overflow: hidden; }
+.stats-bar { height: 100%; background: var(--accent); border-radius: 99px; transition: width .3s; }
+.stats-row-value { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 80px; text-align: right; }
+
+@media (max-width: 600px) {
+  .stats-big-value { font-size: 20px; }
+  .stats-bar-wrap { width: 50px; }
+  .stats-row-value { min-width: 70px; }
+}

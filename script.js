@@ -46,7 +46,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '72-tracker-and-meal-fixes';
+const APP_VERSION = '75-stats-collapse-fix';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
@@ -983,6 +983,7 @@ async function performAutosave(){
     renderWeeksDropdown();
     setStatus('Saved ✓');
     cacheCurrentReportTotal();
+    statsCache = null; // invalidate so stats re-fetches on next view
   } catch(e){
     if (e && e.status === 409){
       // Another device wrote a newer version. Stop autosaving until the user
@@ -1292,6 +1293,7 @@ async function changeSync(){
   const s = sanitizeSyncName(v);
   if (!s) return;
   currentSync = s;
+  statsCache = null; // invalidate stats cache on sync change
   renderSync();
   await loadWeeksForSync(true);
   setButtonsEnabled();
@@ -1374,6 +1376,7 @@ async function init(){
   el('tabBtn1').addEventListener('click', ()=> switchTab(1));
   el('tabBtn2').addEventListener('click', ()=> switchTab(2));
   el('tabBtn3').addEventListener('click', ()=> switchTab(3));
+  el('tabBtn4').addEventListener('click', ()=> switchTab(4));
   el('btnCopyUnpaid').addEventListener('click', copyUnpaidReports);
   el('btnAddMealWeek').addEventListener('click', addMealWeek);
   el('mealPickerClose').addEventListener('click', closeMealPicker);
@@ -1709,11 +1712,14 @@ function switchTab(n){
   el('tab1Content').style.display = n === 1 ? '' : 'none';
   el('tab2Content').style.display = n === 2 ? '' : 'none';
   el('tab3Content').style.display = n === 3 ? '' : 'none';
+  el('tab4Content').style.display = n === 4 ? '' : 'none';
   el('tabBtn1').classList.toggle('tab-active', n === 1);
   el('tabBtn2').classList.toggle('tab-active', n === 2);
   el('tabBtn3').classList.toggle('tab-active', n === 3);
+  el('tabBtn4').classList.toggle('tab-active', n === 4);
   if (n === 2) renderTracker();
   if (n === 3) renderMealTracker();
+  if (n === 4) renderYearStats();
 }
 
 // ==================== MEAL TRACKER (Tab 3) ====================
@@ -1820,13 +1826,26 @@ function renderMealTracker(){
     const week = weeks[i];
     const prevWeek = weeks[i-1];
 
-    // Before this week, insert any payment whose date is >= prevWeek.sundayISO and < week.sundayISO
-    // i.e. payment falls in the gap between the previous week and this week
+    // Insert payment divider before this week if the payment covers prevWeek but NOT this week.
+    // A week is covered if its Saturday < pmt.date (payment during or after that Saturday).
+    // Week is NOT covered if its Saturday >= pmt.date.
     for (const pmt of payments){
       if (pmtUsed.has(pmt.id)) continue;
-      const afterPrev = !prevWeek || pmt.date >= prevWeek.sundayISO;
-      const beforeThis = pmt.date < week.sundayISO;
-      if (afterPrev && beforeThis){
+      // This week's Saturday
+      const sun = parseISODate(week.sundayISO);
+      const sat = new Date(sun); sat.setDate(sat.getDate()+6);
+      const satISO = toISODate(sat);
+      // Previous week's Saturday
+      let prevSatISO = null;
+      if (prevWeek){
+        const ps = parseISODate(prevWeek.sundayISO);
+        const psat = new Date(ps); psat.setDate(psat.getDate()+6);
+        prevSatISO = toISODate(psat);
+      }
+      // Divider goes here if: prevWeek was covered (prevSatISO < pmt.date) AND this week is not (satISO >= pmt.date)
+      const prevCovered = !prevWeek || prevSatISO < pmt.date;
+      const thisNotCovered = satISO >= pmt.date;
+      if (prevCovered && thisNotCovered){
         pmtUsed.add(pmt.id);
         body.appendChild(makeMealPaymentDiv(pmt));
       }
@@ -1843,6 +1862,19 @@ function renderMealTracker(){
   }
 
   renderMealSummary(data);
+
+  // Collapse all week cards except the most recent (last = newest in oldest-first order)
+  setTimeout(() => {
+    const cards = body.querySelectorAll('.meal-week-card');
+    cards.forEach((card, i) => {
+      if (i < cards.length - 1){
+        const tableWrap = card.querySelector('.mwc-table-wrap');
+        const chevron = card.querySelector('.mwc-chevron');
+        if (tableWrap) tableWrap.style.display = 'none';
+        if (chevron) chevron.textContent = '▸';
+      }
+    });
+  }, 0);
 }
 
 function makeMealWeekCard(week, data){
@@ -1978,7 +2010,7 @@ function makeMealPaymentDiv(pmt){
       <span class="meal-pmt-text">✓ ${dateDisp} — ${fmtMoney(pmt.amount)}</span>
     </div>
     <div class="meal-pmt-right">
-      <span class="meal-pmt-badge unpaid-badge">UNPAID ↑</span>
+      <span class="meal-pmt-badge unpaid-badge">UNPAID ↓</span>
       <button class="meal-del-btn" type="button" title="Remove payment">✕</button>
     </div>`;
   div.querySelector('.meal-del-btn').addEventListener('click',function(){
@@ -2135,4 +2167,206 @@ function mealPickerSelectSunday(sundayISO){
   saveMealData(data);
   closeMealPicker();
   renderMealTracker();
+}
+
+// ==================== YEAR STATS (Tab 4) ====================
+
+// Category definitions matching the rows array
+const STAT_CATS = [
+  { key: 'miles',       label: 'Business Miles Driven',  row: 10,  type: 'miles' },
+  { key: 'mileage',     label: 'Mileage Reimbursement',  row: 29,  type: 'currency', computed: true },
+  { key: 'airfare',     label: 'Airfare',                row: 18,  type: 'currency' },
+  { key: 'taxi',        label: 'Bus, Limo & Taxi',       row: 19,  type: 'currency' },
+  { key: 'lodging',     label: 'Lodging',                row: 20,  type: 'currency' },
+  { key: 'parking',     label: 'Parking / Tolls',        row: 21,  type: 'currency' },
+  { key: 'tips',        label: 'Tips',                   row: 22,  type: 'currency' },
+  { key: 'laundry',     label: 'Laundry',                row: 23,  type: 'currency' },
+  { key: 'autorental',  label: 'Auto Rental',            row: 25,  type: 'currency' },
+  { key: 'autofuel',    label: 'Auto Rental Fuel',       row: 26,  type: 'currency' },
+  { key: 'breakfast',   label: 'Breakfast',              row: 42,  type: 'currency' },
+  { key: 'lunch',       label: 'Lunch',                  row: 43,  type: 'currency' },
+  { key: 'dinner',      label: 'Dinner',                 row: 44,  type: 'currency' },
+  { key: 'internet',    label: 'Internet / Email',       row: 34,  type: 'currency' },
+  { key: 'postage',     label: 'Postage',                row: 36,  type: 'currency' },
+  { key: 'tools',       label: 'Perishable Tools',       row: 38,  type: 'currency' },
+  { key: 'dues',        label: 'Dues & Subscriptions',   row: 39,  type: 'currency' },
+];
+
+const STAT_GROUPS = [
+  { label: 'Travel',            keys: ['miles','mileage','airfare','taxi','autorental','autofuel','parking'] },
+  { label: 'Lodging',           keys: ['lodging','laundry','tips'] },
+  { label: 'Meals',             keys: ['breakfast','lunch','dinner'] },
+  { label: 'Other',             keys: ['internet','postage','tools','dues'] },
+];
+
+let statsCache = null; // { year: { catKey: value, ... }, ... }
+let statsLoading = false;
+
+async function renderYearStats(){
+  const body = el('statsBody');
+  if (!currentSync){
+    body.innerHTML = '<p style="text-align:center;color:var(--muted);padding:24px;">No sync set — go to Expense Entry tab first.</p>';
+    return;
+  }
+  if (!reportsCache.length){
+    body.innerHTML = '<p style="text-align:center;color:var(--muted);padding:24px;">No reports found.</p>';
+    return;
+  }
+  if (statsLoading) return;
+  try {
+    if (!statsCache){
+      statsLoading = true;
+      body.innerHTML = '<p style="text-align:center;color:var(--muted);padding:24px;">Fetching all reports…</p>';
+      statsCache = await buildStatsCache();
+      statsLoading = false;
+    }
+    // Populate year selector
+    const yearSel = el('statsYearSelect');
+    const years = Object.keys(statsCache).sort((a,b)=>b-a);
+    if (!yearSel.dataset.populated){
+      yearSel.innerHTML = years.map(y=>`<option value="${y}">${y}</option>`).join('');
+      yearSel.dataset.populated = '1';
+      yearSel.addEventListener('change', ()=> renderStatsForYear(statsCache[yearSel.value]));
+    }
+    const selectedYear = yearSel.value || years[0];
+    renderStatsForYear(statsCache[selectedYear]);
+  } catch(err) {
+    statsLoading = false;
+    statsCache = null;
+    body.innerHTML = `<p style="text-align:center;color:var(--danger);padding:24px;">Error loading stats: ${escHtml(err.message||String(err))}</p>`;
+  }
+}
+
+async function buildStatsCache(){
+  const result = {};
+  // Fetch all reports in parallel (already cached for most)
+  await Promise.all(reportsCache.map(r => fetchReportTotal(r)));
+
+  // Now fetch full data for each report to get per-category totals
+  const allData = await Promise.all(reportsCache.map(r => fetchReportData(r)));
+
+  for (let i = 0; i < reportsCache.length; i++){
+    const r = reportsCache[i];
+    const data = allData[i];
+    if (!data) continue;
+
+    const year = (r.weekEnding || '').slice(0,4);
+    if (!year) continue;
+    if (!result[year]) result[year] = initStatTotals();
+
+    aggregateReport(result[year], data);
+  }
+  return result;
+}
+
+function initStatTotals(){
+  const t = { _reports: 0, _grandTotal: 0 };
+  STAT_CATS.forEach(c => { t[c.key] = 0; });
+  return t;
+}
+
+async function fetchReportData(r){
+  try {
+    const qs = new URLSearchParams({ sync: currentSync, weekEnding: r.weekEnding });
+    if (r.reportId) qs.set('reportId', r.reportId);
+    const out = await apiFetchJson(`${API.data}?${qs.toString()}`);
+    return out.data;
+  } catch { return null; }
+}
+
+function aggregateReport(totals, data){
+  if (!data || !data.entries) return;
+  const entries = data.entries;
+  totals._reports++;
+
+  for (const cat of STAT_CATS){
+    if (cat.computed) continue; // mileage computed from miles below
+    dayCols.forEach(col => {
+      const addr = `${col}${cat.row}`;
+      const items = entries[`${addr}_items`];
+      if (Array.isArray(items) && items.length){
+        totals[cat.key] += items.reduce((s,it)=>s+(Number(it.amount)||0),0);
+      } else if (entries[addr] != null){
+        totals[cat.key] += Number(entries[addr]) || 0;
+      }
+    });
+  }
+
+  // Miles and computed mileage
+  dayCols.forEach(col => {
+    const miles = Number(entries[`${col}10`]) || 0;
+    if (miles > 0){
+      totals.miles += miles;
+      totals.mileage += miles * MILEAGE_RATE;
+    }
+  });
+
+  // Grand total = sum of all currency cats
+  totals._grandTotal = STAT_CATS
+    .filter(c => c.type === 'currency' || c.computed)
+    .reduce((s,c) => s + totals[c.key], 0);
+}
+
+function renderStatsForYear(yearData){
+  const body = el('statsBody');
+  if (!yearData){
+    body.innerHTML = '<p style="text-align:center;color:var(--muted);padding:24px;">No data for this year.</p>';
+    return;
+  }
+
+  const fmt = (n, type) => {
+    if (!n) return '—';
+    if (type === 'miles') return n.toLocaleString('en-US', {maximumFractionDigits:1}) + ' mi';
+    return '$' + n.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+  };
+
+  const catMap = {};
+  STAT_CATS.forEach(c => { catMap[c.key] = c; });
+
+  let html = `
+    <div class="stats-summary-bar">
+      <div class="stats-big-stat">
+        <span class="stats-big-label">Total Spent</span>
+        <span class="stats-big-value">${fmt(yearData._grandTotal,'currency')}</span>
+      </div>
+      <div class="stats-big-stat">
+        <span class="stats-big-label">Reports Filed</span>
+        <span class="stats-big-value">${yearData._reports}</span>
+      </div>
+    </div>`;
+
+  for (const group of STAT_GROUPS){
+    const groupCats = group.keys.map(k => catMap[k]).filter(Boolean);
+    const groupTotal = groupCats
+      .filter(c => c.type === 'currency' || c.computed)
+      .reduce((s,c) => s + (yearData[c.key]||0), 0);
+
+    const hasData = groupCats.some(c => yearData[c.key] > 0);
+
+    html += `<div class="stats-group">
+      <div class="stats-group-header">
+        <span class="stats-group-label">${group.label}</span>
+        ${groupTotal > 0 ? `<span class="stats-group-total">${fmt(groupTotal,'currency')}</span>` : ''}
+      </div>
+      <div class="stats-rows">`;
+
+    for (const cat of groupCats){
+      const val = yearData[cat.key] || 0;
+      const pct = groupTotal > 0 && (cat.type === 'currency' || cat.computed)
+        ? (val / groupTotal * 100) : 0;
+      const dim = !val ? ' stats-row-dim' : '';
+      html += `
+        <div class="stats-row${dim}">
+          <span class="stats-row-label">${cat.label}</span>
+          <div class="stats-row-right">
+            ${pct > 1 ? `<div class="stats-bar-wrap"><div class="stats-bar" style="width:${Math.min(pct,100).toFixed(1)}%"></div></div>` : ''}
+            <span class="stats-row-value">${fmt(val, cat.type)}</span>
+          </div>
+        </div>`;
+    }
+
+    html += `</div></div>`;
+  }
+
+  body.innerHTML = html;
 }
