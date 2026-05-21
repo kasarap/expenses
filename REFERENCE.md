@@ -5,7 +5,7 @@ handoff document — Claude should be able to plan changes from this file
 alone, without the zip attached.
 
 Deployed target: `https://exp.jonmercado.com/` (Cloudflare Pages + KV).
-Current `APP_VERSION` constant: `62-payment-tracker`.
+Current `APP_VERSION` constant: `76-calendar-fix`.
 
 ---
 
@@ -351,7 +351,8 @@ DOM IDs (from `index.html`, accessed via `el(id)`):
 - iOS Safari is the primary mobile test surface.
 - Largely mechanical refactors are fine for Sonnet-class work; reserve
   Opus for design/architecture decisions.
-- **REFERENCE.md is the canonical handoff doc.** Claude updates it
-  after material changes so a fresh session can plan from REFERENCE.md
-  alone, without the project zip attached. When Yon asks for a code
-  change, also update this file in the same delivery.
+- **REFERENCE.md is the canonical handoff doc.** At session start
+  Claude reads REFERENCE.md FIRST (before opening any other file in
+  the zip) so it can plan changes from this file alone without wasting
+  tokens scanning source files unnecessarily. Claude updates
+  REFERENCE.md alongside code changes in the same delivery.

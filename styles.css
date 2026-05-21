@@ -81,7 +81,10 @@ input[type="date"]::-webkit-date-and-time-value{
   min-width:0;
 }
 input[type="date"]::-webkit-calendar-picker-indicator{
+  display:block;
+  opacity:1;
   margin-left:0;
+  cursor:pointer;
 }
 input:focus,select:focus{border-color:var(--accent)}
 input:disabled,select:disabled{opacity:.7}
