@@ -46,7 +46,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '76-calendar-fix';
+const APP_VERSION = '77-copy-name';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
@@ -1100,6 +1100,16 @@ async function deleteCurrentReport(){
 }
 
 // ==================== EXCEL EXPORT ====================
+function copyFileName(){
+  const bp = el('businessPurpose').value.trim();
+  const name = safeFilenameBase(currentWeekEnding, bp);
+  navigator.clipboard.writeText(name).then(()=>{
+    const btn = el('btnCopyName');
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(()=>{ btn.textContent = orig; }, 1500);
+  }).catch(()=> setStatus('Copy failed — check clipboard permissions.'));
+}
 async function downloadExcel(){
   if (!currentWeekEnding){ setStatus('Enter a Sunday date first.'); return; }
   if (!ensureSync()){ setStatus('Sync Name not set.'); return; }
@@ -1312,6 +1322,7 @@ function setStatus(msg=''){
 function setButtonsEnabled(){
   const hasWeek = !!currentWeekEnding;
   el('btnDownload').disabled = !hasWeek;
+  el('btnCopyName').disabled = !hasWeek;
   el('btnDeleteWeek').disabled = !el('weekSelect').value;
   el('btnNewReport').disabled = !hasWeek;
   el('btnSave').disabled = !hasWeek || !currentSync;
@@ -1370,6 +1381,7 @@ async function init(){
     performAutosave();
   });
   el('btnDownload').addEventListener('click', downloadExcel);
+  el('btnCopyName').addEventListener('click', copyFileName);
   el('btnChangeSync').addEventListener('click', changeSync);
 
   // Tab switching
