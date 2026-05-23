@@ -1533,8 +1533,6 @@ async function fetchReportTotal(r){
 // ---- Tracker group collapse state (year/month keys → bool collapsed) ----
 const trackerCollapseState = {};
 
-                     'July','August','September','October','November','December'];
-
 function fmtTrackerMoney(n){
   return '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 }
