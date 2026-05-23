@@ -46,7 +46,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '77-copy-name';
+const APP_VERSION = '78-tracker-groups';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
@@ -1530,6 +1530,16 @@ async function fetchReportTotal(r){
   } catch { reportTotalsCache[key] = 0; return 0; }
 }
 
+// ---- Tracker group collapse state (year/month keys → bool collapsed) ----
+const trackerCollapseState = {};
+
+const MONTH_NAMES = ['January','February','March','April','May','June',
+                     'July','August','September','October','November','December'];
+
+function fmtTrackerMoney(n){
+  return '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+
 // Render the tracker table
 async function renderTracker(){
   const body = el('trackerBody');
@@ -1548,62 +1558,185 @@ async function renderTracker(){
   body.innerHTML = '<tr><td colspan="4" class="tr-empty">Loading totals…</td></tr>';
   const trackerData = loadTrackerData();
 
-  // Sort reports: newest week first, then by reportId within week
+  // Sort reports: newest week first
   const sorted = [...reportsCache].sort((a,b) => b.weekEnding.localeCompare(a.weekEnding));
 
   // Fetch all totals
   await Promise.all(sorted.map(r => fetchReportTotal(r)));
 
+  // ---- Group by year → month (using weekEnding = Saturday date) ----
+  // "month" = month of the Saturday (weekEnding)
+  const groups = []; // [{year, months: [{month, reports:[…]}]}]
+  const yearMap  = new Map();
+  for (const r of sorted){
+    const we = r.weekEnding || '';
+    const year  = parseInt(we.slice(0,4), 10);
+    const month = parseInt(we.slice(5,7), 10) - 1; // 0-based
+    if (!yearMap.has(year)) { yearMap.set(year, new Map()); groups.push(year); }
+    const monthMap = yearMap.get(year);
+    if (!monthMap.has(month)) monthMap.set(month, []);
+    monthMap.get(month).push(r);
+  }
+
   body.innerHTML = '';
-  let oweTotal = 0;
+  let oweTotal   = 0;
   let spentTotal = 0;
   const currentYear = new Date().getFullYear();
 
-  for (const r of sorted){
-    const rKey = r.legacy ? `legacy:${r.weekEnding}` : `${r.weekEnding}:${r.reportId}`;
-    const td = trackerData[rKey] || {};
-    const total = reportTotalsCache[rKey] || 0;
-    const label = trackerReportLabel(r);
-    const isPaid = !!td.paid;
-    const isSent = !!td.sent;
-
-    const reportYear = parseInt((r.weekEnding || '').slice(0,4), 10);
-    if (reportYear === currentYear) spentTotal += total;
-
-    // Owe = sent but not paid
-    if (isSent && !isPaid) oweTotal += total;
-
+  // Helper: insert a collapsible group header row
+  function insertGroupRow(cls, collapseKey, labelHtml, paidAmt, unpaidAmt, depth, parentKey){
+    const isCollapsed = !!trackerCollapseState[collapseKey];
+    const chevron = `<span class="tr-group-chevron ${isCollapsed ? '' : 'open'}">▶</span>`;
+    const totalsHtml = isCollapsed
+      ? `<span class="tr-group-totals">
+           <span class="g-paid">Paid: ${fmtTrackerMoney(paidAmt)}</span>
+           <span class="g-unpaid">Unpaid: ${fmtTrackerMoney(unpaidAmt)}</span>
+         </span>` : '';
     const tr = document.createElement('tr');
-    tr.className = isPaid ? 'tr-paid' : '';
-    tr.dataset.rkey = rKey;
-    tr.innerHTML = `
-      <td class="tr-name-cell">${escHtml(label)}</td>
-      <td class="tr-total-cell">$${total.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-      <td class="tr-date-cell"><input type="date" class="tracker-sent" value="${escHtml(td.sent||'')}" aria-label="Sent date for ${escHtml(label)}"></td>
-      <td class="tr-date-cell"><input type="date" class="tracker-paid" value="${escHtml(td.paid||'')}" aria-label="Paid date for ${escHtml(label)}"></td>
-    `;
-
-    // Events for date inputs
-    tr.querySelector('.tracker-sent').addEventListener('change', function(){
-      saveTrackerDate(rKey, 'sent', this.value);
-    });
-    tr.querySelector('.tracker-paid').addEventListener('change', function(){
-      saveTrackerDate(rKey, 'paid', this.value);
-      // toggle strikethrough immediately
-      if (this.value){
-        tr.classList.add('tr-paid');
-        tr.querySelector('.tr-name-cell').style.textDecoration='line-through';
-      } else {
-        tr.classList.remove('tr-paid');
-        tr.querySelector('.tr-name-cell').style.textDecoration='';
-      }
-      recalcSummary();
-    });
-
+    tr.className = cls;
+    tr.dataset.collapseKey = collapseKey;
+    if (parentKey) tr.dataset.parentKey = parentKey;
+    tr.innerHTML = `<td colspan="4"><div class="tr-group-label-cell">${chevron}${labelHtml}${totalsHtml}</div></td>`;
+    tr.addEventListener('click', () => toggleTrackerGroup(collapseKey));
     body.appendChild(tr);
+    return tr;
+  }
+
+  // Build all rows
+  for (const year of groups){
+    const monthMap = yearMap.get(year);
+    const yearKey  = `y:${year}`;
+
+    // Pre-compute year totals
+    let yearPaid = 0, yearUnpaid = 0;
+    for (const [, reports] of monthMap){
+      for (const r of reports){
+        const rKey = r.legacy ? `legacy:${r.weekEnding}` : `${r.weekEnding}:${r.reportId}`;
+        const td2  = trackerData[rKey] || {};
+        const tot  = reportTotalsCache[rKey] || 0;
+        if (td2.paid) yearPaid += tot; else yearUnpaid += tot;
+      }
+    }
+
+    insertGroupRow('tr-group-year', yearKey, `<strong>${year}</strong>`, yearPaid, yearUnpaid, 0);
+    const yearCollapsed = !!trackerCollapseState[yearKey];
+
+    for (const [month, reports] of monthMap){
+      const monthKey = `m:${year}-${month}`;
+      // Pre-compute month totals
+      let mPaid = 0, mUnpaid = 0;
+      for (const r of reports){
+        const rKey = r.legacy ? `legacy:${r.weekEnding}` : `${r.weekEnding}:${r.reportId}`;
+        const td2  = trackerData[rKey] || {};
+        const tot  = reportTotalsCache[rKey] || 0;
+        if (td2.paid) mPaid += tot; else mUnpaid += tot;
+      }
+
+      const monthHdr = insertGroupRow('tr-group-month', monthKey,
+        MONTH_NAMES[month], mPaid, mUnpaid, 1, yearKey);
+      if (yearCollapsed) monthHdr.style.display = 'none';
+      const monthCollapsed = !!trackerCollapseState[monthKey];
+
+      for (const r of reports){
+        const rKey  = r.legacy ? `legacy:${r.weekEnding}` : `${r.weekEnding}:${r.reportId}`;
+        const td2   = trackerData[rKey] || {};
+        const total = reportTotalsCache[rKey] || 0;
+        const label = trackerReportLabel(r);
+        const isPaid = !!td2.paid;
+        const isSent = !!td2.sent;
+
+        const repYear = parseInt((r.weekEnding||'').slice(0,4), 10);
+        if (repYear === currentYear) spentTotal += total;
+        if (isSent && !isPaid) oweTotal += total;
+
+        const tr = document.createElement('tr');
+        tr.className = isPaid ? 'tr-paid' : '';
+        tr.dataset.rkey  = rKey;
+        tr.dataset.mkey  = monthKey;
+        tr.dataset.ykey  = yearKey;
+        if (yearCollapsed || monthCollapsed) tr.style.display = 'none';
+        tr.innerHTML = `
+          <td class="tr-name-cell">${escHtml(label)}</td>
+          <td class="tr-total-cell">${fmtTrackerMoney(total)}</td>
+          <td class="tr-date-cell"><input type="date" class="tracker-sent" value="${escHtml(td2.sent||'')}" aria-label="Sent date for ${escHtml(label)}"></td>
+          <td class="tr-date-cell"><input type="date" class="tracker-paid" value="${escHtml(td2.paid||'')}" aria-label="Paid date for ${escHtml(label)}"></td>
+        `;
+
+        tr.querySelector('.tracker-sent').addEventListener('change', function(){
+          saveTrackerDate(rKey, 'sent', this.value);
+          recalcSummary();
+        });
+        tr.querySelector('.tracker-paid').addEventListener('change', function(){
+          saveTrackerDate(rKey, 'paid', this.value);
+          if (this.value){
+            tr.classList.add('tr-paid');
+          } else {
+            tr.classList.remove('tr-paid');
+          }
+          recalcSummary();
+        });
+
+        body.appendChild(tr);
+      }
+    }
   }
 
   renderTrackerSummary(oweTotal, spentTotal, trackerData);
+}
+
+function toggleTrackerGroup(collapseKey){
+  trackerCollapseState[collapseKey] = !trackerCollapseState[collapseKey];
+  const isNowCollapsed = trackerCollapseState[collapseKey];
+  const isYear = collapseKey.startsWith('y:');
+
+  // Update the chevron on the header row
+  const hdrRow = document.querySelector(`tr[data-collapse-key="${collapseKey}"]`);
+  if (!hdrRow) return;
+  const chev = hdrRow.querySelector('.tr-group-chevron');
+  if (chev) chev.classList.toggle('open', !isNowCollapsed);
+
+  // Rebuild totals span visibility
+  const labelCell = hdrRow.querySelector('.tr-group-label-cell');
+  if (labelCell){
+    let tot = labelCell.querySelector('.tr-group-totals');
+    if (isNowCollapsed){
+      if (!tot){
+        // compute totals from visible data rows
+        let paidAmt = 0, unpaidAmt = 0;
+        document.querySelectorAll(`tr[data-${isYear ? 'ykey' : 'mkey'}="${collapseKey}"]`).forEach(tr => {
+          const total = parseFloat((tr.querySelector('.tr-total-cell')||{}).textContent?.replace(/[$,]/g,''))||0;
+          if (tr.classList.contains('tr-paid')) paidAmt += total; else unpaidAmt += total;
+        });
+        const span = document.createElement('span');
+        span.className = 'tr-group-totals';
+        span.innerHTML = `<span class="g-paid">Paid: ${fmtTrackerMoney(paidAmt)}</span><span class="g-unpaid">Unpaid: ${fmtTrackerMoney(unpaidAmt)}</span>`;
+        labelCell.appendChild(span);
+      }
+    } else {
+      if (tot) tot.remove();
+    }
+  }
+
+  if (isYear){
+    // Hide/show month headers that belong to this year, and their report rows
+    document.querySelectorAll(`#trackerBody tr.tr-group-month[data-parent-key="${collapseKey}"]`).forEach(mRow => {
+      const mk = mRow.dataset.collapseKey;
+      if (!mk) return;
+      mRow.style.display = isNowCollapsed ? 'none' : '';
+      // report rows under this month: hide if year collapsed OR month collapsed
+      const monthCollapsed = !!trackerCollapseState[mk];
+      document.querySelectorAll(`tr[data-mkey="${mk}"]`).forEach(tr => {
+        tr.style.display = (isNowCollapsed || monthCollapsed) ? 'none' : '';
+      });
+    });
+  } else {
+    // Month toggle: hide/show report rows, but only if year is expanded
+    const yk = document.querySelector(`tr[data-rkey][data-mkey="${collapseKey}"]`)?.dataset.ykey;
+    const yearCollapsed = yk ? !!trackerCollapseState[yk] : false;
+    document.querySelectorAll(`tr[data-mkey="${collapseKey}"]`).forEach(tr => {
+      tr.style.display = (yearCollapsed || isNowCollapsed) ? 'none' : '';
+    });
+  }
 }
 
 function escHtml(s){

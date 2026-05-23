@@ -5,7 +5,7 @@ handoff document — Claude should be able to plan changes from this file
 alone, without the zip attached.
 
 Deployed target: `https://exp.jonmercado.com/` (Cloudflare Pages + KV).
-Current `APP_VERSION` constant: `77-copy-name`.
+Current `APP_VERSION` constant: `78-tracker-groups`.
 
 ---
 

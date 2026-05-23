@@ -823,3 +823,66 @@ th.tr-act, .tracker-table td.tr-act-cell { width: 36px; text-align: center; }
   .stats-bar-wrap { width: 50px; }
   .stats-row-value { min-width: 70px; }
 }
+
+/* ============================================================ */
+/* TRACKER: Year / Month group headers                           */
+/* ============================================================ */
+.tr-group-year td,
+.tr-group-month td {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.tr-group-year td {
+  background: #0e1218;
+  color: var(--muted);
+}
+.tr-group-month td {
+  background: #12171f;
+  color: var(--muted);
+  padding-left: 24px;
+}
+.tr-group-year:hover td,
+.tr-group-month:hover td {
+  color: var(--text);
+}
+.tr-group-chevron {
+  font-size: 10px;
+  opacity: .6;
+  margin-right: 6px;
+  display: inline-block;
+  transition: transform .15s;
+}
+.tr-group-chevron.open { transform: rotate(90deg); }
+.tr-group-summary {
+  font-weight: 400;
+  font-size: 11px;
+  opacity: .7;
+  margin-left: 10px;
+  letter-spacing: 0;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+.tr-group-totals {
+  display: flex;
+  gap: 14px;
+  font-size: 11px;
+  font-weight: 400;
+  opacity: .75;
+  margin-left: auto;
+  letter-spacing: 0;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+.tr-group-totals .g-paid { color: var(--success, #4ade80); }
+.tr-group-totals .g-unpaid { color: var(--danger); }
+.tr-group-label-cell {
+  display: flex;
+  align-items: center;
+}
