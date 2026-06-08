@@ -46,7 +46,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '78-tracker-groups';
+const APP_VERSION = '79-tracker-kv-sync';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
@@ -1459,6 +1459,7 @@ function trackerStorageKey(){
 }
 
 // Load tracker data object: { "weekEnding:reportId": {sent, paid}, "__prevYear__2025": "41307.52" }
+// Returns from localStorage (fast, synchronous). KV sync is handled separately via syncTrackerFromKV.
 function loadTrackerData(){
   if (!currentSync) return {};
   try{
@@ -1470,6 +1471,37 @@ function loadTrackerData(){
 function saveTrackerData(data){
   if (!currentSync) return;
   localStorage.setItem(trackerStorageKey(), JSON.stringify(data));
+  // Fire-and-forget push to KV so other devices stay in sync
+  pushTrackerToKV(data).catch(()=>{});
+}
+
+async function pushTrackerToKV(data){
+  if (!currentSync) return;
+  await fetch(`/api/tracker?sync=${encodeURIComponent(currentSync)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data })
+  });
+}
+
+// Called once on tab 2 open (and on init if tab 2 is active).
+// Pulls KV tracker data; if KV is empty and localStorage has data, pushes localStorage up.
+// If KV has data, merges into localStorage (KV wins for keys that exist in KV).
+async function syncTrackerFromKV(){
+  if (!currentSync) return;
+  try{
+    const res = await fetch(`/api/tracker?sync=${encodeURIComponent(currentSync)}`);
+    const out = await res.json();
+    const local = loadTrackerData();
+    if (out.data && Object.keys(out.data).length > 0){
+      // Merge: KV values overwrite local for matching keys; local keys not in KV are kept
+      const merged = Object.assign({}, local, out.data);
+      localStorage.setItem(trackerStorageKey(), JSON.stringify(merged));
+    } else if (Object.keys(local).length > 0){
+      // KV empty but local has data — push local up to KV
+      await pushTrackerToKV(local);
+    }
+  } catch { /* non-fatal */ }
 }
 
 // Cache of report totals: "weekEnding:reportId" → number
@@ -1553,6 +1585,7 @@ async function renderTracker(){
   }
 
   body.innerHTML = '<tr><td colspan="4" class="tr-empty">Loading totals…</td></tr>';
+  await syncTrackerFromKV();
   const trackerData = loadTrackerData();
 
   // Sort reports: newest week first
