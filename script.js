@@ -46,7 +46,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '79b-tracker-sync-button';
+const APP_VERSION = '80-kv-sync-all-tabs';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
@@ -1390,7 +1390,6 @@ async function init(){
   el('tabBtn3').addEventListener('click', ()=> switchTab(3));
   el('tabBtn4').addEventListener('click', ()=> switchTab(4));
   el('btnCopyUnpaid').addEventListener('click', copyUnpaidReports);
-  el('btnSyncTracker').addEventListener('click', forceSyncTracker);
   el('btnAddMealWeek').addEventListener('click', addMealWeek);
   el('mealPickerClose').addEventListener('click', closeMealPicker);
   el('mealPickerPrev').addEventListener('click', ()=>{ mealPickerMonth--; if(mealPickerMonth<0){mealPickerMonth=11;mealPickerYear--;} renderMealPicker(); });
@@ -1460,7 +1459,6 @@ function trackerStorageKey(){
 }
 
 // Load tracker data object: { "weekEnding:reportId": {sent, paid}, "__prevYear__2025": "41307.52" }
-// Returns from localStorage (fast, synchronous). KV sync is handled separately via syncTrackerFromKV.
 function loadTrackerData(){
   if (!currentSync) return {};
   try{
@@ -1473,53 +1471,36 @@ function saveTrackerData(data){
   if (!currentSync) return;
   localStorage.setItem(trackerStorageKey(), JSON.stringify(data));
   // Fire-and-forget push to KV so other devices stay in sync
-  pushTrackerToKV(data).catch(()=>{});
-}
-
-async function pushTrackerToKV(data){
-  if (!currentSync) return;
-  await fetch(`/api/tracker?sync=${encodeURIComponent(currentSync)}`, {
+  fetch(`/api/tracker?sync=${encodeURIComponent(currentSync)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ data })
-  });
+  }).catch(()=>{});
 }
 
-// Called once on tab 2 open (and on init if tab 2 is active).
-// Pulls KV tracker data; if KV is empty and localStorage has data, pushes localStorage up.
-// If KV has data, merges into localStorage (KV wins for keys that exist in KV).
+// Pull KV tracker data on tab open. KV wins when it has more entries than local.
+// If local has more entries (fresh data not yet pushed), push local up to KV.
 async function syncTrackerFromKV(){
   if (!currentSync) return;
   try{
     const res = await fetch(`/api/tracker?sync=${encodeURIComponent(currentSync)}`);
     const out = await res.json();
     const local = loadTrackerData();
-    if (out.data && Object.keys(out.data).length > 0){
-      // Merge: KV values overwrite local for matching keys; local keys not in KV are kept
+    const localKeys = Object.keys(local).filter(k => !k.startsWith('__prevYear__'));
+    const kvKeys = out.data ? Object.keys(out.data).filter(k => !k.startsWith('__prevYear__')) : [];
+    if (out.data && kvKeys.length >= localKeys.length){
+      // KV has more or equal entries — merge KV into local (KV wins per-key)
       const merged = Object.assign({}, local, out.data);
       localStorage.setItem(trackerStorageKey(), JSON.stringify(merged));
-    } else if (Object.keys(local).length > 0){
-      // KV empty but local has data — push local up to KV
-      await pushTrackerToKV(local);
+    } else if (localKeys.length > kvKeys.length){
+      // Local has more entries — push up to KV
+      await fetch(`/api/tracker?sync=${encodeURIComponent(currentSync)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: local })
+      });
     }
   } catch { /* non-fatal */ }
-}
-
-// Force-push localStorage tracker data to KV, then re-render
-async function forceSyncTracker(){
-  const btn = el("btnSyncTracker");
-  const orig = btn.textContent;
-  btn.textContent = "Syncing…";
-  btn.disabled = true;
-  try{
-    const local = loadTrackerData();
-    await pushTrackerToKV(local);
-    btn.textContent = "Synced ✓";
-    setTimeout(()=>{ btn.textContent = orig; btn.disabled = false; }, 2000);
-  } catch {
-    btn.textContent = "Failed";
-    setTimeout(()=>{ btn.textContent = orig; btn.disabled = false; }, 2000);
-  }
 }
 
 // Cache of report totals: "weekEnding:reportId" → number
@@ -1937,7 +1918,48 @@ function loadMealData(){
   } catch { return {weeks:[], payments:[]}; }
 }
 
-function saveMealData(data){ localStorage.setItem(mealStorageKey(), JSON.stringify(data)); }
+function saveMealData(data){
+  localStorage.setItem(mealStorageKey(), JSON.stringify(data));
+  if (!currentSync) return;
+  fetch(`/api/meal?sync=${encodeURIComponent(currentSync)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data })
+  }).catch(()=>{});
+}
+
+// Pull KV meal data on tab open. KV wins when it has more weeks than local.
+async function syncMealFromKV(){
+  if (!currentSync) return;
+  try{
+    const res = await fetch(`/api/meal?sync=${encodeURIComponent(currentSync)}`);
+    const out = await res.json();
+    const local = loadMealData();
+    if (out.data && Array.isArray(out.data.weeks)){
+      if (out.data.weeks.length >= local.weeks.length){
+        // KV has more or equal — use KV
+        const merged = { weeks: out.data.weeks, payments: out.data.payments || [] };
+        if (!Array.isArray(merged.weeks)) merged.weeks = [];
+        if (!Array.isArray(merged.payments)) merged.payments = [];
+        localStorage.setItem(mealStorageKey(), JSON.stringify(merged));
+      } else {
+        // Local has more — push up to KV
+        await fetch(`/api/meal?sync=${encodeURIComponent(currentSync)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: local })
+        });
+      }
+    } else if (local.weeks.length > 0){
+      // KV empty, local has data — push up
+      await fetch(`/api/meal?sync=${encodeURIComponent(currentSync)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: local })
+      });
+    }
+  } catch { /* non-fatal */ }
+}
 
 function mealWeekLabel(sundayISO){
   const sun = parseISODate(sundayISO);
@@ -1993,8 +2015,9 @@ function computeMealSpent(data){
     .reduce((s,w) => s + mealWeekTotal(w), 0);
 }
 
-function renderMealTracker(){
+async function renderMealTracker(){
   const body = el('mealBody');
+  await syncMealFromKV();
   const data = loadMealData();
   body.innerHTML = '';
 

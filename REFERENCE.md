@@ -5,7 +5,7 @@ handoff document — Claude should be able to plan changes from this file
 alone, without the zip attached.
 
 Deployed target: `https://exp.jonmercado.com/` (Cloudflare Pages + KV).
-Current `APP_VERSION` constant: `79b-tracker-sync-button`.
+Current `APP_VERSION` constant: `80-kv-sync-all-tabs`.
 
 ---
 
