@@ -127,9 +127,12 @@
     <section class="card">
       <div class="tracker-header">
         <h2>Payment Tracker</h2>
-        <button id="btnCopyUnpaid" class="ghost" type="button">📋 Copy Unpaid</button>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button id="btnSyncTracker" class="ghost" type="button">☁️ Sync</button>
+          <button id="btnCopyUnpaid" class="ghost" type="button">📋 Copy Unpaid</button>
+        </div>
       </div>
-      <p class="hint" style="margin-top:0;margin-bottom:12px;">Sent &amp; Paid dates are saved locally — not exported to Excel.</p>
+      <p class="hint" style="margin-top:0;margin-bottom:12px;">Sent &amp; Paid dates sync across devices via cloud. Not exported to Excel.</p>
       <div class="tracker-table-wrap">
         <table class="tracker-table" id="trackerTable">
           <thead>

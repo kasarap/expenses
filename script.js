@@ -46,7 +46,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '79-tracker-kv-sync';
+const APP_VERSION = '79b-tracker-sync-button';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
@@ -1390,6 +1390,7 @@ async function init(){
   el('tabBtn3').addEventListener('click', ()=> switchTab(3));
   el('tabBtn4').addEventListener('click', ()=> switchTab(4));
   el('btnCopyUnpaid').addEventListener('click', copyUnpaidReports);
+  el('btnSyncTracker').addEventListener('click', forceSyncTracker);
   el('btnAddMealWeek').addEventListener('click', addMealWeek);
   el('mealPickerClose').addEventListener('click', closeMealPicker);
   el('mealPickerPrev').addEventListener('click', ()=>{ mealPickerMonth--; if(mealPickerMonth<0){mealPickerMonth=11;mealPickerYear--;} renderMealPicker(); });
@@ -1502,6 +1503,23 @@ async function syncTrackerFromKV(){
       await pushTrackerToKV(local);
     }
   } catch { /* non-fatal */ }
+}
+
+// Force-push localStorage tracker data to KV, then re-render
+async function forceSyncTracker(){
+  const btn = el("btnSyncTracker");
+  const orig = btn.textContent;
+  btn.textContent = "Syncing…";
+  btn.disabled = true;
+  try{
+    const local = loadTrackerData();
+    await pushTrackerToKV(local);
+    btn.textContent = "Synced ✓";
+    setTimeout(()=>{ btn.textContent = orig; btn.disabled = false; }, 2000);
+  } catch {
+    btn.textContent = "Failed";
+    setTimeout(()=>{ btn.textContent = orig; btn.disabled = false; }, 2000);
+  }
 }
 
 // Cache of report totals: "weekEnding:reportId" → number
