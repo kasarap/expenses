@@ -886,3 +886,175 @@ th.tr-act, .tracker-table td.tr-act-cell { width: 36px; text-align: center; }
   display: flex;
   align-items: center;
 }
+
+/* ============================================================ */
+/* CARD TRACKING                                                 */
+/* ============================================================ */
+
+/* --- Card picker (styled <select>) -------------------------- */
+.card-picker{
+  padding:6px 26px 6px 10px;
+  border-radius:999px;
+  border:1px solid var(--line);
+  background:var(--input-bg);
+  color:var(--muted);
+  font-size:12px;
+  font-weight:600;
+  line-height:1;
+  cursor:pointer;
+  width:auto;
+  min-width:96px;
+  max-width:160px;
+  -webkit-appearance:none;
+  appearance:none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-size:4px 4px;
+  background-repeat:no-repeat;
+  transition:background-color .15s, border-color .15s, color .15s;
+}
+.card-picker:focus{ outline:2px solid rgba(77,163,255,.4); outline-offset:1px; }
+.card-picker[data-card=""]{
+  color:var(--muted);
+  background-color:var(--input-bg);
+}
+/* Small variant for desktop table cells */
+.card-picker-sm{
+  padding:3px 22px 3px 8px;
+  font-size:11px;
+  min-width:64px;
+  max-width:110px;
+  background-position:
+    calc(100% - 11px) 50%,
+    calc(100% - 8px) 50%;
+}
+
+/* --- Card chips (read-only badges) -------------------------- */
+.card-chip{
+  display:inline-block;
+  padding:3px 10px;
+  border-radius:999px;
+  border:1px solid var(--line);
+  font-size:11px;
+  font-weight:700;
+  letter-spacing:.02em;
+  line-height:1.4;
+  white-space:nowrap;
+}
+.card-chip-inline{ vertical-align:middle; }
+.card-chip-unassigned{
+  background:#2a3340;
+  color:var(--muted);
+  border-color:#2a3340;
+}
+
+/* --- Card totals section (Tab 1) ---------------------------- */
+.card-totals-list{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+.card-total-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:8px 4px;
+  border-bottom:1px solid rgba(255,255,255,.04);
+}
+.card-total-row:last-child{ border-bottom:none; }
+.card-total-amount{
+  font-weight:700;
+  font-variant-numeric:tabular-nums;
+  font-size:15px;
+  color:var(--text);
+}
+.card-totals-empty{
+  color:var(--muted);
+  font-size:13px;
+  padding:8px 4px;
+  text-align:center;
+}
+
+/* --- Modal item: 2-row layout (top row + card row) ---------- */
+.modal-item-row{
+  display:flex !important;
+  flex-direction:column;
+  gap:8px;
+  /* keep the existing card-style background/border from earlier rules */
+}
+.modal-item-top{
+  display:grid;
+  grid-template-columns:100px 1fr 40px;
+  gap:8px;
+  align-items:center;
+}
+.modal-item-card{
+  display:flex;
+  justify-content:flex-end;
+}
+.modal-item-card .card-picker{
+  min-width:120px;
+}
+@media (max-width:600px){
+  .modal-item-top{ grid-template-columns:110px 1fr 36px; gap:6px; }
+  .modal-item-card{ justify-content:stretch; }
+  .modal-item-card .card-picker{ width:100%; max-width:none; }
+}
+
+/* --- Day sheet: stack input row + card row ------------------ */
+.sheet-field-stack{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  align-items:flex-end;
+}
+.sheet-field-row{
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.sheet-field-card{
+  display:flex;
+  justify-content:flex-end;
+}
+.sheet-field-card .card-picker{
+  min-width:120px;
+}
+
+/* --- Desktop cell wrapper now holds input + btn + picker ---- */
+.cell-wrapper{ gap:4px; flex-wrap:wrap; }
+.cell-wrapper .card-picker-sm{
+  flex-shrink:0;
+}
+
+/* --- Tracker per-card unpaid breakdown ---------------------- */
+.tracker-card-breakdown{
+  padding:10px 0;
+  border-bottom:1px solid var(--line);
+}
+.tracker-card-breakdown-title{
+  font-size:11px;
+  font-weight:700;
+  color:var(--muted);
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  margin-bottom:8px;
+}
+.tracker-card-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:5px 0;
+}
+.tracker-card-amount{
+  font-weight:700;
+  font-variant-numeric:tabular-nums;
+  font-size:14px;
+  color:var(--danger);
+}

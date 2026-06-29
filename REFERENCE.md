@@ -5,11 +5,39 @@ handoff document — Claude should be able to plan changes from this file
 alone, without the zip attached.
 
 Deployed target: `https://exp.jonmercado.com/` (Cloudflare Pages + KV).
-Current `APP_VERSION` constant: `80-kv-sync-all-tabs`.
+Current `APP_VERSION` constant: `81-card-tracking`.
 
 ---
 
 ## What changed in v2 (history)
+
+0. **Card tracking (`81-card-tracking`).** Per-expense credit card
+   tracking across 6 cards (Citi, United, Wells Fargo, PayPal, Amazon,
+   Apple Pay), each color-coded to brand colors. New `CARDS` constant
+   at the top of `script.js` is the single source of truth for keys,
+   labels, and colors. Storage is two-level so no data is lost when
+   toggling between plain amounts and line items:
+   - **Per-item card** lives on each line item: `{id, amount, vendor,
+     note, card}`. Card picker appears per item in the line-item modal.
+   - **Per-cell card** for plain (non-itemized) amounts: stored as
+     `entries["{addr}_card"]` alongside the address value. Card picker
+     appears inline (below the input on mobile day sheet, beside the
+     `+` button on desktop). Hidden when the cell has items.
+   - When the modal seeds an item from a plain amount, the cell card
+     migrates to `items[0].card` and the cell key is cleared.
+   - New "By Card (this week)" section on Tab 1 shows per-card sums
+     for the current week — visible on both desktop and mobile.
+   - Payment Tracker summary now shows "Unpaid by Card" — sum of all
+     sent-but-not-paid reports broken down per card. Driven by a new
+     `reportCardTotalsCache` populated by `fetchReportTotal` and
+     `cacheCurrentReportTotal`.
+   - Year Stats has a new "By Card" group at the top of each year,
+     with bars colored to each card's brand color.
+   - Mileage is **excluded** from card totals — reimbursement, not a
+     card transaction.
+   - Old entries without `card` keys fall into an "Unassigned" bucket
+     that only shows when > 0. Fully backward compatible — no
+     migration required.
 
 1. **Multiple reports per week.** KV key:
    `expenses:{sync}:{weekEnding}:{reportId}`. `reportId` is a slug from
@@ -87,7 +115,11 @@ expenses/
   - `"C8": "Philadelphia"` (text)
   - `"C18": 245.5` (currency/number)
   - Line-itemized: `"C18": <sum>` plus
-    `"C18_items": [{id, amount, vendor, note}, …]`
+    `"C18_items": [{id, amount, vendor, note, card}, …]`
+  - Card on plain (non-itemized) cells: `"C18_card": "citi"` (one of:
+    `citi`, `united`, `wells`, `paypal`, `amazon`, `apple`, or absent).
+    Mutually exclusive with `_items` in practice — when items exist,
+    each item carries its own `card` and `_card` is not used.
 
 ---
 
@@ -325,11 +357,39 @@ DOM IDs (from `index.html`, accessed via `el(id)`):
    XML pixel-by-pixel before theorizing. Do not repeat either of the
    above approaches.
 
+10. **Card storage transitions.** Per-cell card (`_card`) and per-item
+    cards live in different keys and are mutually exclusive in
+    practice. Two transitions to keep clean:
+    - Opening the modal on a plain cell with a `_card` value seeds an
+      item that inherits the cell's card; the `_card` key is then
+      deleted (see openLineItemModal).
+    - Typing a number directly into a cell that had items clears
+      `_items` (existing behavior, gotcha #2). Per-item cards are lost
+      with the items — this is intentional, but means a multi-receipt
+      multi-card cell collapsed back to a single number loses card
+      info and must be re-tagged. UI shows/hides the cell-level picker
+      via `updateCellPickerVisibility()` based on whether items exist.
+
+11. **`reportCardTotalsCache` population.** The tracker's per-card
+    unpaid breakdown depends on this cache. It's populated in two
+    places: `fetchReportTotal` (when first fetching a report's data)
+    and `cacheCurrentReportTotal` (after each successful autosave of
+    the open report). `renderTracker` awaits `fetchReportTotal` for
+    every report before computing the breakdown, so the cache is
+    always fully populated on the Tracker page. The `recalcSummary`
+    path (called when the user toggles a sent/paid date) reuses
+    whatever is already in cache — no re-fetch.
+
 ---
 
 ## Where to make future changes
 
 - New fields / row changes → `script.js` → `rows` array (top of file)
+- Add/edit/remove a card → `script.js` → `CARDS` constant. Each entry:
+  `{key, label, short, bg, fg}`. The `key` is what's stored in
+  `entries`; bg/fg must be valid CSS colors. Adding a card immediately
+  surfaces in the picker, all totals, and stats — no other touch-ups
+  needed.
 - Excel cell mapping → `script.js` → `downloadExcel()`
 - Styling / tokens → `styles.css` → `:root`
 - Autosave timing → `script.js` → `scheduleAutosave()` (800ms debounce)
