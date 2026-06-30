@@ -26,23 +26,12 @@ const CARDS = [
   { key:'apple',  label:'Apple Pay',   short:'Apple',  bg:'#1D1D1F', fg:'#ffffff' },
 ];
 const CARD_MAP = Object.fromEntries(CARDS.map(c => [c.key, c]));
-const UNASSIGNED = { key:'', label:'Unassigned', short:'—', bg:'#2a3340', fg:'#8aa0b3' };
-
-function getCellCard(addr){
-  return currentData?.entries?.[`${addr}_card`] || '';
-}
-function setCellCard(addr, cardKey){
-  if (!currentData) currentData = { entries: {} };
-  if (!currentData.entries) currentData.entries = {};
-  if (cardKey) currentData.entries[`${addr}_card`] = cardKey;
-  else delete currentData.entries[`${addr}_card`];
-}
 
 // Build a <select> styled as a colored card chip.
 // onChange receives the new card key (or '').
 function createCardPicker(currentValue, onChange, opts={}){
   const sel = document.createElement('select');
-  sel.className = 'card-picker' + (opts.size === 'sm' ? ' card-picker-sm' : '');
+  sel.className = 'card-picker';
   const oNone = document.createElement('option');
   oNone.value = '';
   oNone.textContent = opts.placeholder || 'Card…';
@@ -113,7 +102,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '81-card-tracking';
+const APP_VERSION = '82.1-card-popup-only';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
@@ -197,11 +186,8 @@ function openLineItemModal(addr, categoryLabel, dayId){
   let items = getLineItems(addr);
   // If the cell has a plain amount but no item array yet, seed an item from it
   if (items.length === 0 && currentInputValue > 0 && !currentData?.entries?.[`${addr}_items`]){
-    // Carry forward the cell-level card to the seeded item
-    const cellCard = getCellCard(addr);
-    items = [{ id:generateItemId(), amount:currentInputValue, vendor:'', note:'', card:cellCard }];
+    items = [{ id:generateItemId(), amount:currentInputValue, vendor:'', note:'', card:'' }];
     setLineItems(addr, items);
-    if (cellCard) setCellCard(addr, ''); // moved into the item
   }
 
   el('modalTitle').textContent = `${categoryLabel} - ${dayId}`;
@@ -451,16 +437,6 @@ function buildTable(){
             openLineItemModal(addr, r.label, dayId);
           });
           cellWrapper.appendChild(addBtn);
-
-          const cardPicker = createCardPicker(getCellCard(addr), (v) => {
-            // If cell has items, this picker shouldn't be visible; guard anyway
-            if (getLineItems(addr).length > 0) return;
-            setCellCard(addr, v);
-            scheduleAutosave();
-            renderCardTotals();
-          }, { size:'sm' });
-          cardPicker.dataset.cellPicker = addr;
-          cellWrapper.appendChild(cardPicker);
         }
       } else {
         cellWrapper.appendChild(inp);
@@ -643,13 +619,6 @@ function renderDaySheetBody(dayIdx){
       const existingVal = getInputValueForAddr(addr);
 
       if (r.type === 'currency'){
-        // Wrap input+btn row and card picker into a vertical stack on the right
-        const ctrlStack = document.createElement('div');
-        ctrlStack.className = 'sheet-field-stack';
-
-        const inputRow = document.createElement('div');
-        inputRow.className = 'sheet-field-row';
-
         const wrap = document.createElement('div');
         wrap.className = 'sheet-currency-wrap';
         const inp = document.createElement('input');
@@ -672,13 +641,10 @@ function renderDaySheetBody(dayIdx){
           }
           computeTotals();
           updateDaySheetTotal();
-          // Items just got dropped — show the cell-card row again
-          const cardEl = ctrlStack.querySelector('.sheet-field-card');
-          if (cardEl) cardEl.style.display = '';
           scheduleAutosave();
         });
         wrap.appendChild(inp);
-        inputRow.appendChild(wrap);
+        ctrl.appendChild(wrap);
 
         if (!r.computed){
           const addBtn = document.createElement('button');
@@ -690,28 +656,8 @@ function renderDaySheetBody(dayIdx){
           addBtn.addEventListener('click', ()=>{
             openLineItemModal(addr, r.label, dayIds[dayIdx]);
           });
-          inputRow.appendChild(addBtn);
+          ctrl.appendChild(addBtn);
         }
-
-        ctrlStack.appendChild(inputRow);
-
-        // Cell-level card picker (hidden when the cell has line items)
-        if (!r.computed){
-          const cardRow = document.createElement('div');
-          cardRow.className = 'sheet-field-card';
-          const hasAnyItems = getLineItems(addr).length > 0;
-          if (hasAnyItems) cardRow.style.display = 'none';
-          const cardPicker = createCardPicker(getCellCard(addr), (v) => {
-            if (getLineItems(addr).length > 0) return; // guard
-            setCellCard(addr, v);
-            scheduleAutosave();
-            renderCardTotals();
-          });
-          cardRow.appendChild(cardPicker);
-          ctrlStack.appendChild(cardRow);
-        }
-
-        ctrl.appendChild(ctrlStack);
       } else if (r.type === 'number'){
         const inp = document.createElement('input');
         inp.type = 'number';
@@ -883,21 +829,21 @@ function computeTotals(){
   el('totWEEK').value = week ? `$${week.toFixed(2)}` : '';
 
   updateButtonColors();
-  updateCellPickerVisibility();
   renderCardTotals();
 }
 
 // ---- Card totals (current week) ----
-// Walk all currency cells: items contribute by item.card; plain cells by
-// entries[addr_card]; everything else falls into 'unassigned'. Mileage is
-// excluded — it's reimbursed mileage, not a card transaction.
+// Walk all currency cells. Items contribute by item.card; items without a
+// card AND any plain non-itemized amount fall into 'cash'. Mileage (computed
+// from miles × rate) is also cash — it's a reimbursement, not a card charge.
+// This mirrors the rule: cells without a + button (mileage, miles, from/to)
+// are cash, and any tagged-able cell that hasn't been tagged is also cash.
 function computeCardTotals(){
-  const totals = { unassigned: 0 };
-  CARDS.forEach(c => totals[c.key] = 0);
+  const totals = emptyCardTotals();
 
   allInputs().forEach(inp => {
     if (inp.dataset.type !== 'currency') return;
-    if (inp.dataset.computed === 'true') return; // skip mileage
+    if (inp.dataset.computed === 'true') return; // mileage handled below
     const addr = `${inp.dataset.col}${inp.dataset.row}`;
     const items = getLineItems(addr);
     if (items.length > 0){
@@ -906,7 +852,7 @@ function computeCardTotals(){
         if (!amt) return;
         const k = it.card || '';
         if (k && totals[k] != null) totals[k] += amt;
-        else totals.unassigned += amt;
+        else totals.cash += amt;
       });
       return;
     }
@@ -914,10 +860,19 @@ function computeCardTotals(){
     if (!v) return;
     const n = Number(v);
     if (!Number.isFinite(n) || !n) return;
-    const k = getCellCard(addr);
-    if (k && totals[k] != null) totals[k] += n;
-    else totals.unassigned += n;
+    totals.cash += n; // plain amount with no items → cash
   });
+
+  // Mileage: row 10 (miles) × rate, summed across the week → cash
+  for (let i = 0; i < 7; i++){
+    const milesInp = el('entryTable').querySelector(
+      `input[data-row="10"][data-col="${dayCols[i]}"]`
+    );
+    if (!milesInp) continue;
+    const miles = Number((milesInp.value || '').trim()) || 0;
+    if (miles > 0) totals.cash += miles * MILEAGE_RATE;
+  }
+
   return totals;
 }
 
@@ -925,12 +880,12 @@ function renderCardTotals(){
   const container = el('cardTotalsList');
   if (!container) return;
   const totals = computeCardTotals();
-  const grand = CARDS.reduce((s,c)=> s + totals[c.key], 0) + totals.unassigned;
+  const grand = CARDS.reduce((s,c)=> s + totals[c.key], 0) + totals.cash;
   if (!grand){
     container.innerHTML = '<div class="card-totals-empty">No expenses yet this week.</div>';
     return;
   }
-  // Build chip rows: ordered as CARDS, then unassigned if > 0
+  // Build chip rows: ordered as CARDS, then cash if > 0
   const rowsHtml = [];
   CARDS.forEach(c => {
     const amt = totals[c.key];
@@ -941,30 +896,14 @@ function renderCardTotals(){
         <span class="card-total-amount">$${amt.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
       </div>`);
   });
-  if (totals.unassigned > 0){
+  if (totals.cash > 0){
     rowsHtml.push(`
       <div class="card-total-row">
-        <span class="card-chip card-chip-unassigned">Unassigned</span>
-        <span class="card-total-amount">$${totals.unassigned.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+        <span class="card-chip card-chip-cash">Cash</span>
+        <span class="card-total-amount">$${totals.cash.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
       </div>`);
   }
   container.innerHTML = rowsHtml.join('');
-}
-
-// Show or hide the cell-level card picker on desktop based on whether the
-// cell has items (items have their own picker via the modal).
-function updateCellPickerVisibility(){
-  const pickers = el('entryTable').querySelectorAll('.card-picker[data-cell-picker]');
-  pickers.forEach(p => {
-    const addr = p.dataset.cellPicker;
-    const hasItems = getLineItems(addr).length > 0;
-    p.style.display = hasItems ? 'none' : '';
-    if (!hasItems){
-      // Resync visible value to whatever is currently stored on the cell
-      p.value = getCellCard(addr) || '';
-      applyCardPickerStyle(p);
-    }
-  });
 }
 
 // escHtml() lives in the tracker section below. Provide a safe alias for use
@@ -989,11 +928,10 @@ function serialize(){
       entries[addr] = raw;
     }
   });
-  // carry line-item arrays AND cell-level cards
+  // carry line-item arrays (card lives on each item; no cell-level card key)
   if (currentData?.entries){
     Object.keys(currentData.entries).forEach(key => {
       if (key.endsWith('_items')) entries[key] = currentData.entries[key];
-      else if (key.endsWith('_card')) entries[key] = currentData.entries[key];
     });
   }
   return {
@@ -1581,6 +1519,8 @@ function onBusinessPurposeChange(){
 // ==================== INIT ====================
 async function init(){
   buildTable();
+  const vb = el('appVersionBadge');
+  if (vb) vb.textContent = `v${APP_VERSION}`;
   computeTotals();
   renderSync();
   renderMobileDayStrip();
@@ -1722,11 +1662,11 @@ async function syncTrackerFromKV(){
 // Cache of report totals: "weekEnding:reportId" → number
 const reportTotalsCache = {};
 // Parallel cache of per-card totals for each report (excludes mileage):
-// "weekEnding:reportId" → {citi, united, wells, paypal, amazon, apple, unassigned}
+// "weekEnding:reportId" → {citi, united, wells, paypal, amazon, apple, cash}
 const reportCardTotalsCache = {};
 
 function emptyCardTotals(){
-  const t = { unassigned: 0 };
+  const t = { cash: 0 };
   CARDS.forEach(c => t[c.key] = 0);
   return t;
 }
@@ -1751,7 +1691,8 @@ function trackerReportLabel(r){
   return `Week ${sunMD} through ${satMD} - ${bp}`;
 }
 
-// Aggregate per-card totals from a raw entries map. Excludes mileage.
+// Aggregate per-card totals from a raw entries map.
+// Cash = mileage + items with no card + plain (non-itemized) amounts.
 function aggregateCardTotalsFromEntries(entries){
   const totals = emptyCardTotals();
   if (!entries) return totals;
@@ -1766,16 +1707,19 @@ function aggregateCardTotalsFromEntries(entries){
           if (!amt) return;
           const k = it.card || '';
           if (k && totals[k] != null) totals[k] += amt;
-          else totals.unassigned += amt;
+          else totals.cash += amt;
         });
       } else if (entries[addr] != null){
         const n = Number(entries[addr]) || 0;
         if (!n) return;
-        const k = entries[`${addr}_card`] || '';
-        if (k && totals[k] != null) totals[k] += n;
-        else totals.unassigned += n;
+        totals.cash += n; // plain amount → cash
       }
     });
+  });
+  // Mileage (row 10 miles × rate) → cash
+  dayCols.forEach(col => {
+    const miles = Number(entries[`${col}10`]) || 0;
+    if (miles > 0) totals.cash += miles * MILEAGE_RATE;
   });
   return totals;
 }
@@ -2074,11 +2018,11 @@ function renderTrackerSummary(oweTotal, spentTotal, trackerData, oweCardTotals){
           <span class="tracker-card-amount">$${amt.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
         </div>`);
     });
-    if (oweCardTotals.unassigned > 0){
+    if (oweCardTotals.cash > 0){
       cardRows.push(`
         <div class="tracker-card-row">
-          <span class="card-chip card-chip-unassigned">Unassigned</span>
-          <span class="tracker-card-amount">$${oweCardTotals.unassigned.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+          <span class="card-chip card-chip-cash">Cash</span>
+          <span class="tracker-card-amount">$${oweCardTotals.cash.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
         </div>`);
     }
     if (cardRows.length){
@@ -2873,7 +2817,7 @@ function renderStatsForYear(yearData){
 
   // ---- By Card group (per-card yearly totals) ----
   const byCard = yearData._byCard || emptyCardTotals();
-  const cardSum = CARDS.reduce((s,c)=> s + (byCard[c.key]||0), 0) + (byCard.unassigned||0);
+  const cardSum = CARDS.reduce((s,c)=> s + (byCard[c.key]||0), 0) + (byCard.cash||0);
   if (cardSum > 0){
     html += `<div class="stats-group">
       <div class="stats-group-header">
@@ -2896,16 +2840,16 @@ function renderStatsForYear(yearData){
           </div>
         </div>`;
     }
-    if (byCard.unassigned > 0){
-      const pct = (byCard.unassigned / cardSum * 100);
+    if (byCard.cash > 0){
+      const pct = (byCard.cash / cardSum * 100);
       html += `
         <div class="stats-row">
           <span class="stats-row-label">
-            <span class="card-chip card-chip-unassigned card-chip-inline">Unassigned</span>
+            <span class="card-chip card-chip-cash card-chip-inline">Cash</span>
           </span>
           <div class="stats-row-right">
             ${pct > 1 ? `<div class="stats-bar-wrap"><div class="stats-bar" style="width:${Math.min(pct,100).toFixed(1)}%"></div></div>` : ''}
-            <span class="stats-row-value">${fmt(byCard.unassigned,'currency')}</span>
+            <span class="stats-row-value">${fmt(byCard.cash,'currency')}</span>
           </div>
         </div>`;
     }

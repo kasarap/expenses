@@ -5,39 +5,48 @@ handoff document — Claude should be able to plan changes from this file
 alone, without the zip attached.
 
 Deployed target: `https://exp.jonmercado.com/` (Cloudflare Pages + KV).
-Current `APP_VERSION` constant: `81-card-tracking`.
+Current `APP_VERSION` constant: `82-card-popup-only`.
 
 ---
 
 ## What changed in v2 (history)
 
-0. **Card tracking (`81-card-tracking`).** Per-expense credit card
-   tracking across 6 cards (Citi, United, Wells Fargo, PayPal, Amazon,
-   Apple Pay), each color-coded to brand colors. New `CARDS` constant
-   at the top of `script.js` is the single source of truth for keys,
-   labels, and colors. Storage is two-level so no data is lost when
-   toggling between plain amounts and line items:
-   - **Per-item card** lives on each line item: `{id, amount, vendor,
-     note, card}`. Card picker appears per item in the line-item modal.
-   - **Per-cell card** for plain (non-itemized) amounts: stored as
-     `entries["{addr}_card"]` alongside the address value. Card picker
-     appears inline (below the input on mobile day sheet, beside the
-     `+` button on desktop). Hidden when the cell has items.
-   - When the modal seeds an item from a plain amount, the cell card
-     migrates to `items[0].card` and the cell key is cleared.
-   - New "By Card (this week)" section on Tab 1 shows per-card sums
-     for the current week — visible on both desktop and mobile.
-   - Payment Tracker summary now shows "Unpaid by Card" — sum of all
-     sent-but-not-paid reports broken down per card. Driven by a new
-     `reportCardTotalsCache` populated by `fetchReportTotal` and
-     `cacheCurrentReportTotal`.
-   - Year Stats has a new "By Card" group at the top of each year,
-     with bars colored to each card's brand color.
-   - Mileage is **excluded** from card totals — reimbursement, not a
-     card transaction.
-   - Old entries without `card` keys fall into an "Unassigned" bucket
-     that only shows when > 0. Fully backward compatible — no
-     migration required.
+0. **Card tracking, popup-only (`82-card-popup-only`).** Refined v81.
+   Card selection happens **only inside the line-item popup** (the `+`
+   modal). No inline pickers on the desktop grid or mobile day sheet —
+   keeps the entry surface clean. Anything not tagged with a card is
+   counted as **Cash**:
+   - Cells without a `+` button (mileage, miles, From/To) → Cash.
+   - Cells with `+` but no items, or items with no card chosen → Cash.
+   - Items with a card chosen → bucketed under that card.
+
+   **Storage and sync.** Card data lives on each line item:
+   `{id, amount, vendor, note, card}` inside `entries["{addr}_items"]`.
+   That array goes through the standard `/api/data` PUT, so card
+   selections sync via Cloudflare KV exactly like every other expense
+   field. Open the same report on another device and the card chips
+   re-render from KV state. The v81 cell-level `_card` key has been
+   removed; any old `_card` keys on existing reports are ignored by
+   the new totals math and get cleaned out on the next autosave.
+
+   **Where totals show up.**
+   - Tab 1 "By Card (this week)" — current-week per-card sums, with
+     Cash row last (only when > 0).
+   - Payment Tracker → "Unpaid by Card" — per-card sum of sent-but-
+     unpaid reports. Driven by `reportCardTotalsCache`, populated by
+     `fetchReportTotal` on the first tracker render and by
+     `cacheCurrentReportTotal` after each autosave.
+   - Year Stats → "By Card" group at top of each year, bars colored
+     to each brand.
+
+   **Brand colors** (in the `CARDS` constant): Citi `#0058A6`,
+   United `#002244`, Wells Fargo `#D71E28`, PayPal `#0070BA`,
+   Amazon `#FF9900`, Apple Pay `#1D1D1F`. Edit `CARDS` to add or
+   remove a card — totals/stats pick it up automatically.
+
+1. **Card tracking, v1 (`81-card-tracking`, superseded by v82).**
+   Initial implementation with inline pickers on every cell. Yon
+   pushed back: too noisy. Replaced by the popup-only design above.
 
 1. **Multiple reports per week.** KV key:
    `expenses:{sync}:{weekEnding}:{reportId}`. `reportId` is a slug from
@@ -116,10 +125,10 @@ expenses/
   - `"C18": 245.5` (currency/number)
   - Line-itemized: `"C18": <sum>` plus
     `"C18_items": [{id, amount, vendor, note, card}, …]`
-  - Card on plain (non-itemized) cells: `"C18_card": "citi"` (one of:
-    `citi`, `united`, `wells`, `paypal`, `amazon`, `apple`, or absent).
-    Mutually exclusive with `_items` in practice — when items exist,
-    each item carries its own `card` and `_card` is not used.
+  - `card` on a line item is one of: `citi`, `united`, `wells`,
+    `paypal`, `amazon`, `apple`, or `''` (no card = cash).
+    Stored verbatim through `/api/data` PUT, so it syncs across
+    devices via KV alongside the rest of the report.
 
 ---
 
@@ -357,28 +366,28 @@ DOM IDs (from `index.html`, accessed via `el(id)`):
    XML pixel-by-pixel before theorizing. Do not repeat either of the
    above approaches.
 
-10. **Card storage transitions.** Per-cell card (`_card`) and per-item
-    cards live in different keys and are mutually exclusive in
-    practice. Two transitions to keep clean:
-    - Opening the modal on a plain cell with a `_card` value seeds an
-      item that inherits the cell's card; the `_card` key is then
-      deleted (see openLineItemModal).
-    - Typing a number directly into a cell that had items clears
-      `_items` (existing behavior, gotcha #2). Per-item cards are lost
-      with the items — this is intentional, but means a multi-receipt
-      multi-card cell collapsed back to a single number loses card
-      info and must be re-tagged. UI shows/hides the cell-level picker
-      via `updateCellPickerVisibility()` based on whether items exist.
+10. **"Cash" is the catch-all bucket.** In every per-card total
+    (Tab 1, Tracker, Year Stats), `Cash` collects: (a) mileage
+    reimbursement (row 10 miles × $0.70), (b) line items with no
+    card chosen, (c) plain non-itemized amounts. Edit `CARDS` to add
+    a real card — anything not assigned falls here. The bucket key
+    in code is literally `'cash'` (was `'unassigned'` in v81).
 
-11. **`reportCardTotalsCache` population.** The tracker's per-card
-    unpaid breakdown depends on this cache. It's populated in two
-    places: `fetchReportTotal` (when first fetching a report's data)
-    and `cacheCurrentReportTotal` (after each successful autosave of
-    the open report). `renderTracker` awaits `fetchReportTotal` for
-    every report before computing the breakdown, so the cache is
-    always fully populated on the Tracker page. The `recalcSummary`
-    path (called when the user toggles a sent/paid date) reuses
-    whatever is already in cache — no re-fetch.
+11. **Card data syncs via the main report PUT, not a side channel.**
+    Cards live on items inside `entries[addr_items]`, so they
+    piggy-back on the standard autosave → `/api/data` PUT → KV. No
+    separate endpoint. Open a report on a second device, get the same
+    cards. The Payment Tracker and Mercado tabs still use their own
+    `tracker:` / `meal_tracker:` KV keys (v80) for sent/paid dates;
+    card totals there are derived in-memory from each report's items.
+
+12. **`reportCardTotalsCache` population.** Tracker's "Unpaid by
+    Card" depends on this in-memory cache. Populated by
+    `fetchReportTotal` (when tracker first loads, fetches every
+    report in parallel) and `cacheCurrentReportTotal` (after each
+    autosave on the open report). `renderTracker` awaits all fetches
+    before computing, so the cache is fully populated by render time.
+    `recalcSummary` (toggle sent/paid date) reads cache, no refetch.
 
 ---
 
