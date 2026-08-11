@@ -1038,9 +1038,24 @@ th.tr-act, .tracker-table td.tr-act-cell { width: 36px; text-align: center; }
   font-size:12px;
 }
 .tracker-select-cb{
-  width:15px;
-  height:15px;
+  /* Override the global input,select reset (appearance:none, padding:10px,
+     border-radius:10px, width:100%) that turns checkboxes into stretched
+     pill blobs — restore the native small checkbox with a tick. */
+  -webkit-appearance:checkbox;
+  appearance:checkbox;
+  width:16px;
+  height:16px;
+  min-width:16px;
+  max-width:16px;
+  min-height:16px;
+  padding:0;
+  margin:0;
+  border:none;
+  border-radius:0;
+  background:none;
+  box-sizing:content-box;
   flex-shrink:0;
+  flex-grow:0;
   accent-color:var(--accent);
   cursor:pointer;
 }
@@ -1091,6 +1106,25 @@ th.tr-act, .tracker-table td.tr-act-cell { width: 36px; text-align: center; }
   font-weight:700;
   font-size:13px;
   color:var(--text);
+}
+.tracker-selection-weeks{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  padding:8px 0;
+  margin-bottom:6px;
+  border-bottom:1px solid var(--line);
+}
+.tracker-selection-week-item{
+  font-size:12px;
+  color:var(--muted);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.tracker-selection-week-item::before{
+  content:"• ";
+  color:var(--accent);
 }
 .tracker-selection-clear{
   padding:4px 10px;

@@ -5,13 +5,43 @@ handoff document — Claude should be able to plan changes from this file
 alone, without the zip attached.
 
 Deployed target: `https://exp.jonmercado.com/` (Cloudflare Pages + KV).
-Current `APP_VERSION` constant: `85-tracker-same-day-autoselect`.
+Current `APP_VERSION` constant: `86-favicon-checkbox-fix`.
 
 ---
 
 ## What changed in v2 (history)
 
-0. **Payment Tracker: same-day auto-select (`85-tracker-same-day-autoselect`).**
+0. **Favicon + checkbox fix + selection week list (`86-favicon-checkbox-fix`).**
+   Three small fixes bundled together:
+   - **Favicon.** Added `favicon.ico` (root) + `icons/favicon-{16,32,192,512}.png`
+     + `icons/apple-touch-icon.png`, wired via `<link rel="icon">` /
+     `<link rel="apple-touch-icon">` tags in `index.html`'s `<head>`.
+     Source is the circular "NF" badge cropped from a screenshot Yon
+     provided (only ~51×51px native resolution, so it's soft at large
+     sizes like the 512px/apple-touch-icon — fine for a browser tab,
+     but a higher-res source logo would sharpen it if Yon has one.
+     Background outside the circle was keyed to transparent via a
+     circular alpha mask so it doesn't show a dark square behind the
+     badge in light-themed browser chrome.
+   - **Checkbox styling fix.** The global `input,select{ appearance:none;
+     padding:10px; border-radius:10px; width:100%; ... }` reset (styles.css
+     ~line 55, needed for the text/date inputs) was bleeding onto
+     `.tracker-select-cb` from v83, turning it into a stretched pill
+     instead of a checkbox. Fixed by restoring
+     `appearance:checkbox`/`-webkit-appearance:checkbox` and explicitly
+     zeroing padding/border/border-radius/background with a fixed
+     16×16 box, styled via `accent-color`. **Gotcha for any future
+     custom checkbox**: the blanket `input,select` reset in this file
+     applies to `type="checkbox"` too — always add an explicit
+     `appearance:checkbox` override, don't just set `width`/`height`.
+   - **Selection panel lists week names.** `trackerRowLabelByKey`
+     (rKey → label, e.g. "Week 7-19 through 7-25 - Angelton")
+     populated during `renderTracker`'s row loop.
+     `updateTrackerSelectionSummary()` now renders a bulleted list of
+     the selected weeks' labels above the card-total rows, sorted
+     newest-first.
+
+1. **Payment Tracker: same-day auto-select (`85-tracker-same-day-autoselect`).**
    Simplified v84's separate "paid on" date-picker input away — one
    control was one too many. Behavior now lives entirely in the
    existing per-row checkbox (`.tracker-select-cb`, added in v83):
@@ -136,6 +166,10 @@ expenses/
 │                              download.
 ├── jszip.min.js               Fallback JSZip (loaded if vendor/ fails).
 ├── vendor/jszip.min.js        Primary JSZip path (~96K).
+├── favicon.ico                Multi-size (16/32/48) NF badge icon.
+├── icons/                     favicon-{16,32,192,512}.png + apple-touch-icon.png.
+│                              Source is low-res (~51px) — resharpen from a
+│                              better logo file if Yon provides one.
 └── functions/api/
     ├── data.js   ~132 lines.  GET/PUT/DELETE /api/data. reportId-aware.
     │                          Implements OCC on PUT.

@@ -102,7 +102,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '85-tracker-same-day-autoselect';
+const APP_VERSION = '86-favicon-checkbox-fix';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
@@ -1778,6 +1778,9 @@ const trackerCollapseState = {};
 // date also auto-checks any other week paid on that same date (the common
 // case of several reports getting paid together in one batch).
 const selectedTrackerWeeks = new Set();
+// rKey → display label ("Week M-D through M-D - BP"), repopulated on every
+// renderTracker() row build. Lets the selection summary list week names.
+const trackerRowLabelByKey = {};
 
 function fmtTrackerMoney(n){
   return '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -1833,12 +1836,27 @@ function updateTrackerSelectionSummary(){
       </div>`);
   }
   const n = selectedTrackerWeeks.size;
+
+  // List which weeks make up the total, newest first (matches table order).
+  const weekNames = [...selectedTrackerWeeks]
+    .sort((a, b) => {
+      const wa = a.startsWith('legacy:') ? a.slice(7) : a.split(':')[0];
+      const wb = b.startsWith('legacy:') ? b.slice(7) : b.split(':')[0];
+      return wb.localeCompare(wa);
+    })
+    .map(k => trackerRowLabelByKey[k] || k);
+  const weeksListHtml = `
+    <div class="tracker-selection-weeks">
+      ${weekNames.map(w => `<div class="tracker-selection-week-item">${escHtml(w)}</div>`).join('')}
+    </div>`;
+
   box.style.display = '';
   box.innerHTML = `
     <div class="tracker-selection-head">
       <div class="tracker-selection-title">${n} week${n===1?'':'s'} selected — Total Paid: ${fmtTrackerMoney(grand)}</div>
       <button type="button" class="ghost tracker-selection-clear" id="btnClearTrackerSelection">Clear</button>
     </div>
+    ${weeksListHtml}
     ${rows.length ? rows.join('') : '<div class="tracker-card-breakdown-empty">No card-tagged expenses in the selected weeks.</div>'}
   `;
   el('btnClearTrackerSelection').addEventListener('click', () => {
@@ -1954,6 +1972,7 @@ async function renderTracker(){
         const td2   = trackerData[rKey] || {};
         const total = reportTotalsCache[rKey] || 0;
         const label = trackerReportLabel(r);
+        trackerRowLabelByKey[rKey] = label;
         const isPaid = !!td2.paid;
         const isSent = !!td2.sent;
 
