@@ -5,26 +5,28 @@ handoff document — Claude should be able to plan changes from this file
 alone, without the zip attached.
 
 Deployed target: `https://exp.jonmercado.com/` (Cloudflare Pages + KV).
-Current `APP_VERSION` constant: `84-tracker-paid-date-filter`.
+Current `APP_VERSION` constant: `85-tracker-same-day-autoselect`.
 
 ---
 
 ## What changed in v2 (history)
 
-0. **Payment Tracker: "paid on" date filter (`84-tracker-paid-date-filter`).**
-   Adds a date input (`#trackerPaidDateFilter`, wired in `init()`) above
-   the tracker table. Picking a date calls `applyTrackerPaidDateFilter(dateStr)`,
-   which checks every report row whose `.tracker-paid` value matches —
-   the common case being several weeks paid together on the same day —
-   and drives the same `selectedTrackerWeeks` / `updateTrackerSelectionSummary()`
-   path v83 added. When the filter is active the summary panel title
-   switches to "N weeks paid {date} — Total Paid: $X" instead of the
-   generic "N weeks selected" wording. Manual checkbox clicks clear
-   `trackerPaidDateFilter` (mixing modes would be ambiguous); editing an
-   individual row's Paid date while a filter is active re-runs the
-   filter so the panel stays in sync. Module-level `trackerPaidDateFilter`
-   (string ISO date or `null`) tracks which mode is active; reset to
-   `null` on every `renderTracker()` rebuild alongside `selectedTrackerWeeks`.
+0. **Payment Tracker: same-day auto-select (`85-tracker-same-day-autoselect`).**
+   Simplified v84's separate "paid on" date-picker input away — one
+   control was one too many. Behavior now lives entirely in the
+   existing per-row checkbox (`.tracker-select-cb`, added in v83):
+   checking any week still supports picking arbitrary/random weeks
+   freely, but if the checked week has a non-empty Paid date, every
+   *other* row sharing that same Paid date value is auto-checked too
+   (the common case: several reports paid together in one batch).
+   Unchecking a box only removes that single week — it does not
+   cascade-uncheck the rest of the auto-selected group. This is a
+   one-time action at check-time, not a maintained binding: editing a
+   row's Paid date afterward does not retroactively re-group already-
+   selected rows. Summary panel title is now always
+   "N weeks selected — Total Paid: $X" (no more mode-switching text).
+   `#trackerPaidDateFilter` input, its CSS, and its `init()` listener
+   are removed entirely.
 
 1. **Payment Tracker: per-week card breakdown + week selector
    (`83-tracker-card-selector`).** Two additions to the Payment
@@ -440,13 +442,14 @@ DOM IDs (from `index.html`, accessed via `el(id)`):
     `reportTotalsCache` — same caches gotcha #12 describes — so they
     only need those caches populated, no new API calls.
 
-14. **"Paid on" date filter vs. manual selection are mutually
-    exclusive (`84-tracker-paid-date-filter`).** Only one mode is
-    "true" at a time, tracked by `trackerPaidDateFilter`. Don't add a
-    third way to populate `selectedTrackerWeeks` without deciding how
-    it interacts with these two — right now any manual checkbox click
-    silently drops the date filter, and any paid-date edit silently
-    re-applies it if active.
+14. **Same-day auto-select is one-time, not a live binding
+    (`85-tracker-same-day-autoselect`).** Checking a week's box with a
+    Paid date auto-checks siblings sharing that date, but only at the
+    moment of the click — the group isn't tracked as a unit afterward.
+    Unchecking one doesn't uncheck the others; editing a Paid date
+    doesn't regroup existing selections. If a future change wants a
+    true live group binding, it needs new state beyond the flat
+    `selectedTrackerWeeks` Set.
 
 ---
 
