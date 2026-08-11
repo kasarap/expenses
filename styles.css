@@ -1021,6 +1021,81 @@ th.tr-act, .tracker-table td.tr-act-cell { width: 36px; text-align: center; }
   font-size:14px;
   color:var(--danger);
 }
+.tracker-card-breakdown-empty{
+  color:var(--muted);
+  font-size:12px;
+  padding:4px 0;
+}
+
+/* --- Tracker: per-row week selector checkbox ----------------- */
+.tr-select-wrap{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  cursor:pointer;
+  flex-direction:row !important;
+  color:var(--text);
+  font-size:12px;
+}
+.tracker-select-cb{
+  width:15px;
+  height:15px;
+  flex-shrink:0;
+  accent-color:var(--accent);
+  cursor:pointer;
+}
+
+/* --- Tracker: per-week compact card breakdown sub-row --------- */
+.tr-card-breakdown-row td{
+  padding:4px 8px 10px !important;
+  border-bottom:1px solid var(--line) !important;
+  background:rgba(255,255,255,.015);
+}
+.tr-mini-chips{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+}
+.tr-mini-chip{
+  display:inline-block;
+  padding:2px 8px;
+  border-radius:999px;
+  border:1px solid var(--line);
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:.02em;
+  white-space:nowrap;
+}
+.tr-mini-chip-cash{
+  background:#2a3340;
+  color:var(--muted);
+  border-color:#2a3340;
+}
+
+/* --- Tracker: selected-weeks combined card total panel -------- */
+.tracker-selection-summary{
+  border:1px solid var(--accent);
+  background:var(--accent-weak);
+  border-radius:12px;
+  padding:12px 14px;
+  margin-bottom:14px;
+}
+.tracker-selection-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:8px;
+}
+.tracker-selection-title{
+  font-weight:700;
+  font-size:13px;
+  color:var(--text);
+}
+.tracker-selection-clear{
+  padding:4px 10px;
+  font-size:12px;
+}
 
 /* ---- Version badge in header ---- */
 .version-badge{

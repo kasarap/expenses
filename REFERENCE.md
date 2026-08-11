@@ -5,13 +5,38 @@ handoff document — Claude should be able to plan changes from this file
 alone, without the zip attached.
 
 Deployed target: `https://exp.jonmercado.com/` (Cloudflare Pages + KV).
-Current `APP_VERSION` constant: `82-card-popup-only`.
+Current `APP_VERSION` constant: `83-tracker-card-selector`.
 
 ---
 
 ## What changed in v2 (history)
 
-0. **Card tracking, popup-only (`82-card-popup-only`).** Refined v81.
+0. **Payment Tracker: per-week card breakdown + week selector
+   (`83-tracker-card-selector`).** Two additions to the Payment
+   Tracker tab, both derived from data already in
+   `reportCardTotalsCache` — no new fetches or storage:
+   - **Per-week breakdown sub-row.** Every report row in
+     `#trackerBody` now gets a compact sub-`<tr class="tr-card-breakdown-row">`
+     directly beneath it with inline chips ("Citi $12.34", "Cash
+     $4.00", …) built by `cardChipsMiniHtml()`. Skipped entirely if
+     the report has no card-tagged/cash amounts. The sub-row carries
+     the same `data-mkey`/`data-ykey` as its parent so it hides/shows
+     in lockstep with `toggleTrackerGroup()` — no changes needed
+     there. It intentionally has **no** `data-rkey`, so it's excluded
+     from `recalcSummary()`'s row query.
+   - **Week selector + combined total.** Each report row's name cell
+     now wraps the label in a checkbox (`.tracker-select-cb`).
+     Checking one adds its `rKey` to the in-memory `selectedTrackerWeeks`
+     Set; `updateTrackerSelectionSummary()` sums
+     `reportCardTotalsCache` (per-card) and `reportTotalsCache`
+     (grand total) across the set and renders into the
+     `#trackerSelectionSummary` panel (above the table, hidden when
+     nothing is selected). "Clear" button empties the set and
+     unchecks all boxes. Selection is UI-only — not persisted to KV/
+     localStorage, and resets on every `renderTracker()` rebuild
+     (tab switch, sync change, week list reload).
+
+1. **Card tracking, popup-only (`82-card-popup-only`).** Refined v81.
    Card selection happens **only inside the line-item popup** (the `+`
    modal). No inline pickers on the desktop grid or mobile day sheet —
    keeps the entry surface clean. Anything not tagged with a card is
@@ -388,6 +413,17 @@ DOM IDs (from `index.html`, accessed via `el(id)`):
     autosave on the open report). `renderTracker` awaits all fetches
     before computing, so the cache is fully populated by render time.
     `recalcSummary` (toggle sent/paid date) reads cache, no refetch.
+
+13. **Tracker per-week breakdown row / week selector
+    (`83-tracker-card-selector`).** `cardChipsMiniHtml(totals)` turns
+    a card-totals object into inline chip HTML (shared by the
+    per-week sub-row). `selectedTrackerWeeks` (a `Set` of `rKey`) is
+    populated by the `.tracker-select-cb` checkbox in each report
+    row's name cell; `updateTrackerSelectionSummary()` sums the
+    selected weeks' cached totals into `#trackerSelectionSummary`.
+    Both features read `reportCardTotalsCache` /
+    `reportTotalsCache` — same caches gotcha #12 describes — so they
+    only need those caches populated, no new API calls.
 
 ---
 

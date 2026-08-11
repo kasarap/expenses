@@ -102,7 +102,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '82.1-card-popup-only';
+const APP_VERSION = '83-tracker-card-selector';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
@@ -1773,14 +1773,84 @@ async function fetchReportTotal(r){
 // ---- Tracker group collapse state (year/month keys → bool collapsed) ----
 const trackerCollapseState = {};
 
+// ---- Tracker week selector (checkbox picks) — rKey set, in-memory only ----
+const selectedTrackerWeeks = new Set();
+
 function fmtTrackerMoney(n){
   return '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+
+// Build compact inline card chips ("Citi $12.34") for a totals object.
+// Returns '' if every bucket is 0/empty.
+function cardChipsMiniHtml(totals){
+  if (!totals) return '';
+  const chips = [];
+  CARDS.forEach(c => {
+    const amt = totals[c.key] || 0;
+    if (!amt) return;
+    chips.push(`<span class="tr-mini-chip" style="background:${c.bg};color:${c.fg};border-color:${c.bg};">${escHtml(c.short || c.label)} ${fmtTrackerMoney(amt)}</span>`);
+  });
+  if (totals.cash > 0){
+    chips.push(`<span class="tr-mini-chip tr-mini-chip-cash">Cash ${fmtTrackerMoney(totals.cash)}</span>`);
+  }
+  return chips.join('');
+}
+
+// Re-render the "selected weeks" combined card-total panel from selectedTrackerWeeks.
+function updateTrackerSelectionSummary(){
+  const box = el('trackerSelectionSummary');
+  if (!box) return;
+  if (!selectedTrackerWeeks.size){
+    box.style.display = 'none';
+    box.innerHTML = '';
+    return;
+  }
+  const totals = emptyCardTotals();
+  let grand = 0;
+  selectedTrackerWeeks.forEach(rKey => {
+    const ct = reportCardTotalsCache[rKey];
+    if (ct){ for (const k of Object.keys(totals)) totals[k] += ct[k] || 0; }
+    grand += reportTotalsCache[rKey] || 0;
+  });
+  const rows = [];
+  CARDS.forEach(c => {
+    const amt = totals[c.key] || 0;
+    if (!amt) return;
+    rows.push(`
+      <div class="tracker-card-row">
+        <span class="card-chip" style="background:${c.bg};color:${c.fg};border-color:${c.bg};">${escHtml(c.label)}</span>
+        <span class="tracker-card-amount">${fmtTrackerMoney(amt)}</span>
+      </div>`);
+  });
+  if (totals.cash > 0){
+    rows.push(`
+      <div class="tracker-card-row">
+        <span class="card-chip card-chip-cash">Cash</span>
+        <span class="tracker-card-amount">${fmtTrackerMoney(totals.cash)}</span>
+      </div>`);
+  }
+  const n = selectedTrackerWeeks.size;
+  box.style.display = '';
+  box.innerHTML = `
+    <div class="tracker-selection-head">
+      <div class="tracker-selection-title">${n} week${n===1?'':'s'} selected — ${fmtTrackerMoney(grand)}</div>
+      <button type="button" class="ghost tracker-selection-clear" id="btnClearTrackerSelection">Clear</button>
+    </div>
+    ${rows.length ? rows.join('') : '<div class="tracker-card-breakdown-empty">No card-tagged expenses in the selected weeks.</div>'}
+  `;
+  el('btnClearTrackerSelection').addEventListener('click', () => {
+    selectedTrackerWeeks.clear();
+    document.querySelectorAll('.tracker-select-cb').forEach(cb => { cb.checked = false; });
+    updateTrackerSelectionSummary();
+  });
 }
 
 // Render the tracker table
 async function renderTracker(){
   const body = el('trackerBody');
   const summary = el('trackerSummary');
+  selectedTrackerWeeks.clear();
+  updateTrackerSelectionSummary();
   if (!currentSync){
     body.innerHTML = '<tr><td colspan="4" class="tr-empty">No sync set — go to Expense Entry tab first.</td></tr>';
     summary.innerHTML = '';
@@ -1903,12 +1973,21 @@ async function renderTracker(){
         tr.dataset.ykey  = yearKey;
         if (yearCollapsed || monthCollapsed) tr.style.display = 'none';
         tr.innerHTML = `
-          <td class="tr-name-cell">${escHtml(label)}</td>
+          <td class="tr-name-cell">
+            <label class="tr-select-wrap">
+              <input type="checkbox" class="tracker-select-cb" aria-label="Select ${escHtml(label)} for card total">
+              <span>${escHtml(label)}</span>
+            </label>
+          </td>
           <td class="tr-total-cell">${fmtTrackerMoney(total)}</td>
           <td class="tr-date-cell"><input type="date" class="tracker-sent" value="${escHtml(td2.sent||'')}" aria-label="Sent date for ${escHtml(label)}"></td>
           <td class="tr-date-cell"><input type="date" class="tracker-paid" value="${escHtml(td2.paid||'')}" aria-label="Paid date for ${escHtml(label)}"></td>
         `;
 
+        tr.querySelector('.tracker-select-cb').addEventListener('change', function(){
+          if (this.checked) selectedTrackerWeeks.add(rKey); else selectedTrackerWeeks.delete(rKey);
+          updateTrackerSelectionSummary();
+        });
         tr.querySelector('.tracker-sent').addEventListener('change', function(){
           saveTrackerDate(rKey, 'sent', this.value);
           recalcSummary();
@@ -1924,6 +2003,18 @@ async function renderTracker(){
         });
 
         body.appendChild(tr);
+
+        // Per-week card breakdown sub-row (mirrors the parent row's collapse state).
+        const weekChipsHtml = cardChipsMiniHtml(reportCardTotalsCache[rKey]);
+        if (weekChipsHtml){
+          const btr = document.createElement('tr');
+          btr.className = 'tr-card-breakdown-row' + (isPaid ? ' tr-paid' : '');
+          btr.dataset.mkey = monthKey;
+          btr.dataset.ykey = yearKey;
+          if (yearCollapsed || monthCollapsed) btr.style.display = 'none';
+          btr.innerHTML = `<td colspan="4"><div class="tr-mini-chips">${weekChipsHtml}</div></td>`;
+          body.appendChild(btr);
+        }
       }
     }
   }
