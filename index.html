@@ -134,7 +134,12 @@
         <h2>Payment Tracker</h2>
         <button id="btnCopyUnpaid" class="ghost" type="button">📋 Copy Unpaid</button>
       </div>
-      <p class="hint" style="margin-top:0;margin-bottom:12px;">Sent &amp; Paid dates sync across devices via cloud. Not exported to Excel. Check weeks below to total their card breakdown.</p>
+      <p class="hint" style="margin-top:0;margin-bottom:12px;">Sent &amp; Paid dates sync across devices via cloud. Not exported to Excel. Check weeks below, or pick a paid date, to total their card breakdown.</p>
+      <div class="tracker-paid-filter">
+        <label for="trackerPaidDateFilter">Weeks paid on</label>
+        <input type="date" id="trackerPaidDateFilter" aria-label="Find weeks paid on this date">
+        <span class="tracker-paid-filter-hint">Selects every week paid on that date</span>
+      </div>
       <div class="tracker-selection-summary" id="trackerSelectionSummary" style="display:none;"></div>
       <div class="tracker-table-wrap">
         <table class="tracker-table" id="trackerTable">

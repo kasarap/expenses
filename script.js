@@ -102,7 +102,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '83-tracker-card-selector';
+const APP_VERSION = '84-tracker-paid-date-filter';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
@@ -1546,6 +1546,7 @@ async function init(){
   el('tabBtn3').addEventListener('click', ()=> switchTab(3));
   el('tabBtn4').addEventListener('click', ()=> switchTab(4));
   el('btnCopyUnpaid').addEventListener('click', copyUnpaidReports);
+  el('trackerPaidDateFilter').addEventListener('change', function(){ applyTrackerPaidDateFilter(this.value); });
   el('btnAddMealWeek').addEventListener('click', addMealWeek);
   el('mealPickerClose').addEventListener('click', closeMealPicker);
   el('mealPickerPrev').addEventListener('click', ()=>{ mealPickerMonth--; if(mealPickerMonth<0){mealPickerMonth=11;mealPickerYear--;} renderMealPicker(); });
@@ -1775,6 +1776,26 @@ const trackerCollapseState = {};
 
 // ---- Tracker week selector (checkbox picks) — rKey set, in-memory only ----
 const selectedTrackerWeeks = new Set();
+// ISO date string when selection was driven by the "paid on" date picker
+// (vs. manual checkbox picks); null = manual mode. Drives the "Total Paid"
+// wording in the selection summary.
+let trackerPaidDateFilter = null;
+
+// Check every week row whose Paid date matches dateStr (multiple weeks are
+// often paid together on the same day — this is the fast path for that).
+// Empty/falsy dateStr clears the filter and the selection.
+function applyTrackerPaidDateFilter(dateStr){
+  trackerPaidDateFilter = dateStr || null;
+  selectedTrackerWeeks.clear();
+  document.querySelectorAll('#trackerBody tr[data-rkey]').forEach(tr => {
+    const paidInput = tr.querySelector('.tracker-paid');
+    const cb = tr.querySelector('.tracker-select-cb');
+    const matches = !!dateStr && paidInput && paidInput.value === dateStr;
+    if (cb) cb.checked = matches;
+    if (matches) selectedTrackerWeeks.add(tr.dataset.rkey);
+  });
+  updateTrackerSelectionSummary();
+}
 
 function fmtTrackerMoney(n){
   return '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -1830,16 +1851,27 @@ function updateTrackerSelectionSummary(){
       </div>`);
   }
   const n = selectedTrackerWeeks.size;
+  let titleHtml;
+  if (trackerPaidDateFilter){
+    const d = parseISODate(trackerPaidDateFilter);
+    const dateLabel = `${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`;
+    titleHtml = `${n} week${n===1?'':'s'} paid ${dateLabel} — Total Paid: ${fmtTrackerMoney(grand)}`;
+  } else {
+    titleHtml = `${n} week${n===1?'':'s'} selected — ${fmtTrackerMoney(grand)}`;
+  }
   box.style.display = '';
   box.innerHTML = `
     <div class="tracker-selection-head">
-      <div class="tracker-selection-title">${n} week${n===1?'':'s'} selected — ${fmtTrackerMoney(grand)}</div>
+      <div class="tracker-selection-title">${titleHtml}</div>
       <button type="button" class="ghost tracker-selection-clear" id="btnClearTrackerSelection">Clear</button>
     </div>
     ${rows.length ? rows.join('') : '<div class="tracker-card-breakdown-empty">No card-tagged expenses in the selected weeks.</div>'}
   `;
   el('btnClearTrackerSelection').addEventListener('click', () => {
     selectedTrackerWeeks.clear();
+    trackerPaidDateFilter = null;
+    const dateInput = el('trackerPaidDateFilter');
+    if (dateInput) dateInput.value = '';
     document.querySelectorAll('.tracker-select-cb').forEach(cb => { cb.checked = false; });
     updateTrackerSelectionSummary();
   });
@@ -1850,6 +1882,9 @@ async function renderTracker(){
   const body = el('trackerBody');
   const summary = el('trackerSummary');
   selectedTrackerWeeks.clear();
+  trackerPaidDateFilter = null;
+  const pdFilterInput = el('trackerPaidDateFilter');
+  if (pdFilterInput) pdFilterInput.value = '';
   updateTrackerSelectionSummary();
   if (!currentSync){
     body.innerHTML = '<tr><td colspan="4" class="tr-empty">No sync set — go to Expense Entry tab first.</td></tr>';
@@ -1985,6 +2020,10 @@ async function renderTracker(){
         `;
 
         tr.querySelector('.tracker-select-cb').addEventListener('change', function(){
+          // Manual pick overrides any active "paid on" date filter.
+          trackerPaidDateFilter = null;
+          const dateFilterInput = el('trackerPaidDateFilter');
+          if (dateFilterInput) dateFilterInput.value = '';
           if (this.checked) selectedTrackerWeeks.add(rKey); else selectedTrackerWeeks.delete(rKey);
           updateTrackerSelectionSummary();
         });
@@ -2000,6 +2039,8 @@ async function renderTracker(){
             tr.classList.remove('tr-paid');
           }
           recalcSummary();
+          // Keep an active date filter in sync with edits to individual paid dates.
+          if (trackerPaidDateFilter) applyTrackerPaidDateFilter(trackerPaidDateFilter);
         });
 
         body.appendChild(tr);

@@ -1072,6 +1072,38 @@ th.tr-act, .tracker-table td.tr-act-cell { width: 36px; text-align: center; }
   border-color:#2a3340;
 }
 
+/* --- Tracker: "paid on" date filter --------------------------- */
+.tracker-paid-filter{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-bottom:12px;
+}
+.tracker-paid-filter label{
+  flex-direction:row !important;
+  color:var(--muted);
+  font-size:13px;
+  white-space:nowrap;
+}
+.tracker-paid-filter input[type="date"]{
+  border:1px solid var(--line);
+  background:var(--input-bg);
+  color:var(--text);
+  border-radius:8px;
+  padding:6px 10px;
+  font-size:13px;
+  max-width:170px;
+}
+.tracker-paid-filter input[type="date"]:focus{border-color:var(--accent);outline:none}
+.tracker-paid-filter-hint{
+  color:var(--muted);
+  font-size:11px;
+}
+@media (max-width:600px){
+  .tracker-paid-filter-hint{display:none}
+}
+
 /* --- Tracker: selected-weeks combined card total panel -------- */
 .tracker-selection-summary{
   border:1px solid var(--accent);

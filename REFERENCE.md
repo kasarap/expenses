@@ -5,13 +5,28 @@ handoff document — Claude should be able to plan changes from this file
 alone, without the zip attached.
 
 Deployed target: `https://exp.jonmercado.com/` (Cloudflare Pages + KV).
-Current `APP_VERSION` constant: `83-tracker-card-selector`.
+Current `APP_VERSION` constant: `84-tracker-paid-date-filter`.
 
 ---
 
 ## What changed in v2 (history)
 
-0. **Payment Tracker: per-week card breakdown + week selector
+0. **Payment Tracker: "paid on" date filter (`84-tracker-paid-date-filter`).**
+   Adds a date input (`#trackerPaidDateFilter`, wired in `init()`) above
+   the tracker table. Picking a date calls `applyTrackerPaidDateFilter(dateStr)`,
+   which checks every report row whose `.tracker-paid` value matches —
+   the common case being several weeks paid together on the same day —
+   and drives the same `selectedTrackerWeeks` / `updateTrackerSelectionSummary()`
+   path v83 added. When the filter is active the summary panel title
+   switches to "N weeks paid {date} — Total Paid: $X" instead of the
+   generic "N weeks selected" wording. Manual checkbox clicks clear
+   `trackerPaidDateFilter` (mixing modes would be ambiguous); editing an
+   individual row's Paid date while a filter is active re-runs the
+   filter so the panel stays in sync. Module-level `trackerPaidDateFilter`
+   (string ISO date or `null`) tracks which mode is active; reset to
+   `null` on every `renderTracker()` rebuild alongside `selectedTrackerWeeks`.
+
+1. **Payment Tracker: per-week card breakdown + week selector
    (`83-tracker-card-selector`).** Two additions to the Payment
    Tracker tab, both derived from data already in
    `reportCardTotalsCache` — no new fetches or storage:
@@ -424,6 +439,14 @@ DOM IDs (from `index.html`, accessed via `el(id)`):
     Both features read `reportCardTotalsCache` /
     `reportTotalsCache` — same caches gotcha #12 describes — so they
     only need those caches populated, no new API calls.
+
+14. **"Paid on" date filter vs. manual selection are mutually
+    exclusive (`84-tracker-paid-date-filter`).** Only one mode is
+    "true" at a time, tracked by `trackerPaidDateFilter`. Don't add a
+    third way to populate `selectedTrackerWeeks` without deciding how
+    it interacts with these two — right now any manual checkbox click
+    silently drops the date filter, and any paid-date edit silently
+    re-applies it if active.
 
 ---
 
