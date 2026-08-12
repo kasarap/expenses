@@ -24,6 +24,7 @@ const CARDS = [
   { key:'paypal', label:'PayPal',      short:'PayPal', bg:'#0070BA', fg:'#ffffff' },
   { key:'amazon', label:'Amazon',      short:'Amazon', bg:'#FF9900', fg:'#1a1a1a' },
   { key:'apple',  label:'Apple Pay',   short:'Apple',  bg:'#1D1D1F', fg:'#ffffff' },
+  { key:'chase',  label:'Chase Freedom', short:'Chase', bg:'#117ACA', fg:'#ffffff' },
 ];
 const CARD_MAP = Object.fromEntries(CARDS.map(c => [c.key, c]));
 
@@ -102,7 +103,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '86-favicon-checkbox-fix';
+const APP_VERSION = '87-chase-freedom-card';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();

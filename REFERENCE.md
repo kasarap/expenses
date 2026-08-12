@@ -5,13 +5,22 @@ handoff document — Claude should be able to plan changes from this file
 alone, without the zip attached.
 
 Deployed target: `https://exp.jonmercado.com/` (Cloudflare Pages + KV).
-Current `APP_VERSION` constant: `86-favicon-checkbox-fix`.
+Current `APP_VERSION` constant: `87-chase-freedom-card`.
 
 ---
 
 ## What changed in v2 (history)
 
-0. **Favicon + checkbox fix + selection week list (`86-favicon-checkbox-fix`).**
+0. **Added Chase Freedom card (`87-chase-freedom-card`).** New entry in
+   the `CARDS` constant: `{key:'chase', label:'Chase Freedom',
+   short:'Chase', bg:'#117ACA', fg:'#ffffff'}` (Chase brand blue).
+   Per the "Where to make future changes" section below, this is the
+   only touch needed — the line-item card picker, Tab 1 "By Card",
+   Payment Tracker "Unpaid by Card" + per-week breakdown rows +
+   selected-weeks panel, and Year Stats all iterate `CARDS`
+   dynamically and picked it up automatically.
+
+1. **Favicon + checkbox fix + selection week list (`86-favicon-checkbox-fix`).**
    Three small fixes bundled together:
    - **Favicon.** Added `favicon.ico` (root) + `icons/favicon-{16,32,192,512}.png`
      + `icons/apple-touch-icon.png`, wired via `<link rel="icon">` /
@@ -113,8 +122,9 @@ Current `APP_VERSION` constant: `86-favicon-checkbox-fix`.
 
    **Brand colors** (in the `CARDS` constant): Citi `#0058A6`,
    United `#002244`, Wells Fargo `#D71E28`, PayPal `#0070BA`,
-   Amazon `#FF9900`, Apple Pay `#1D1D1F`. Edit `CARDS` to add or
-   remove a card — totals/stats pick it up automatically.
+   Amazon `#FF9900`, Apple Pay `#1D1D1F`, Chase Freedom `#117ACA`.
+   Edit `CARDS` to add or remove a card — totals/stats pick it up
+   automatically.
 
 1. **Card tracking, v1 (`81-card-tracking`, superseded by v82).**
    Initial implementation with inline pickers on every cell. Yon
