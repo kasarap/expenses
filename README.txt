@@ -9,7 +9,7 @@ What this does
 - Multiple reports per week: each report is uniquely identified by
   week-ending date + a slug from the Business Purpose
 - Autosaves every edit (debounced ~800ms)
-- Exports a filled Excel. Weeks from 2026-09-21 on use the 2026 KH form
+- Exports a filled Excel. Weeks from 2026-09-14 on use the 2026 KH form
   "Expenses Form 2026.xlsx" (Mon→Sun, week ending Sunday); older weeks use
   "Expenses Form.xlsx" (Sun→Sat, week ending Saturday):
     - E5 = Week Ending (as an Excel date serial)

@@ -5,11 +5,20 @@ handoff document — Claude should be able to plan changes from this file
 alone, without the zip attached.
 
 Deployed target: `https://exp.jonmercado.com/` (Cloudflare Pages + KV).
-Current `APP_VERSION` constant: `88-form-2026`.
+Current `APP_VERSION` constant: `89-convert-919`.
 
 ---
 
 ## What changed in v2 (history)
+
+0. **Cutover moved to 9/14 + whole-number miles (`89-convert-919`).**
+   `FORM2026_FIRST_MONDAY` → `'2026-09-14'` (first Mon–Sun week ends
+   Sun 9/20) so the "Rental Tolls" week ending Sat 9/19 can be
+   converted too. Convert button now shows for any Saturday-keyed
+   report with weekEnding ≥ `FORM2026_FIRST_CONVERTIBLE_SAT`
+   (`'2026-09-19'`). In `Expenses Form 2026.xlsx`, cellXfs[54]
+   (used only by C10:I10, Business Miles) changed numFmtId 2 (`0.00`)
+   → 1 (`0`) to match the KH form's whole-number miles.
 
 0. **2026 KH expense form, Mon→Sun weeks (`88-form-2026`).** Company
    moved to the "KH Expense Form 2026" layout: days run **MON..SUN** and
@@ -30,7 +39,7 @@ Current `APP_VERSION` constant: `88-form-2026`.
      legacy template, SUN..SAT. Cols C..I always = week position 0..6
      starting at `weekEnding − 6`, so totals, tracker, stats and card
      math needed no changes.
-   - **Cutover:** `FORM2026_FIRST_MONDAY = '2026-09-21'`. The week
+   - **Cutover:** `FORM2026_FIRST_MONDAY` (was `'2026-09-21'`, now `'2026-09-14'` — see v89). The week
      input (id still `sundayDate`, now "Week start (pick any day)")
      snaps any picked date via `weekEndingForDate()`: ≥ cutover → Mon
      start / Sun end; earlier → Sun start / Sat end.
@@ -40,7 +49,7 @@ Current `APP_VERSION` constant: `88-form-2026`.
      `date0..6`, `dow0..6`, `tot0..6`, `th0..6` (were `dateSUN` etc.).
    - **Convert button** (`#btnConvertWeek`, `convertReportTo2026()`):
      shown only for a Saturday-keyed report with weekEnding ≥
-     2026-09-26 (the week straddling the cutover). Shifts D..I → C..H
+     2026-09-26 (v89: ≥ 2026-09-19). Shifts D..I → C..H
      (incl. `_items`), PUTs to weekEnding+1 (Sunday), deletes the old
      key, and moves any Payment Tracker sent/paid entry. Refuses if the
      old Sunday column (C) has data. Used once to move "Angelton" week
@@ -236,7 +245,7 @@ expenses/
 - **Sync Name** — namespace per user. `localStorage['expenses_sync_name']`.
   Sanitized to ≤80 chars. Single-line, whitespace collapsed.
 - **Week Ending** — ISO `YYYY-MM-DD`. **Sunday** for 2026-form weeks
-  (Mon→Sun, from 2026-09-21 on), **Saturday** for legacy weeks. Week
+  (Mon→Sun, from 2026-09-14 on), **Saturday** for legacy weeks. Week
   start = weekEnding − 6 (`computeSundayFromWeekEnding()` — name is
   historical; it returns the week-start date for either layout).
 - **reportId** — slug of BP, 1–40 chars `[a-z0-9-]`. Unique per

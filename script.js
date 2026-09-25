@@ -24,7 +24,9 @@ let dayLongNames = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday
 // ==================== WEEK LAYOUT (2026 form cutover) ====================
 // Weeks that START on/after this Monday use the 2026 KH form (Mon→Sun,
 // week ending Sunday). Anything earlier stays on the legacy Sun→Sat form.
-const FORM2026_FIRST_MONDAY = '2026-09-21'; // → first 2026 week ends Sun 2026-09-27
+const FORM2026_FIRST_MONDAY = '2026-09-14'; // → first 2026 week ends Sun 2026-09-20
+// Legacy Sat-keyed reports from here on overlap Mon–Sun weeks → offer Convert.
+const FORM2026_FIRST_CONVERTIBLE_SAT = '2026-09-19';
 const TEMPLATE_2026   = 'Expenses Form 2026.xlsx';
 const TEMPLATE_LEGACY = 'Expenses Form.xlsx';
 
@@ -151,7 +153,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '88-form-2026';
+const APP_VERSION = '89-convert-919';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
@@ -1303,7 +1305,7 @@ async function deleteCurrentReport(){
 
 // ==================== CONVERT TO 2026 FORM ====================
 // One-time migration for a Sun→Sat report whose week straddles the cutover
-// (e.g. week ending Sat 2026-09-26). Shifts Mon..Sat (cols D..I) one column
+// (week ending Sat 2026-09-19 or later). Shifts Mon..Sat (cols D..I) one column
 // left into the Mon→Sun layout (C..H), re-keys it to the following Sunday,
 // and removes the old Saturday-keyed report. The legacy week's Sunday
 // (col C) belongs to the previous week in the new layout, so conversion is
@@ -1311,7 +1313,7 @@ async function deleteCurrentReport(){
 function canConvertTo2026(){
   return !!currentWeekEnding && !!currentReportId
     && !isForm2026(currentWeekEnding)
-    && currentWeekEnding >= '2026-09-26'          // only the week straddling the cutover
+    && currentWeekEnding >= FORM2026_FIRST_CONVERTIBLE_SAT // weeks overlapping the Mon–Sun era
     && parseISODate(currentWeekEnding).getDay() === 6;
 }
 function updateConvertButton(){
@@ -1606,7 +1608,7 @@ function setButtonsEnabled(){
 function onSundayChange(){
   const picked = el('sundayDate').value;
   if (!picked) return;
-  // Snap any picked date to its report week (Mon–Sun from 2026-09-21 on,
+  // Snap any picked date to its report week (Mon–Sun from 2026-09-14 on,
   // Sun–Sat before that) and show the week-start date in the input.
   const newWeekEnding = weekEndingForDate(picked);
   const v = toISODate(computeSundayFromWeekEnding(newWeekEnding));
