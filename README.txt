@@ -9,10 +9,12 @@ What this does
 - Multiple reports per week: each report is uniquely identified by
   week-ending date + a slug from the Business Purpose
 - Autosaves every edit (debounced ~800ms)
-- Exports a filled Excel using the template "Expenses Form.xlsx":
-    - E5 = Week Ending (Saturday date, as an Excel date serial)
+- Exports a filled Excel. Weeks from 2026-09-21 on use the 2026 KH form
+  "Expenses Form 2026.xlsx" (Mon→Sun, week ending Sunday); older weeks use
+  "Expenses Form.xlsx" (Sun→Sat, week ending Saturday):
+    - E5 = Week Ending (as an Excel date serial)
     - H5 = Business Purpose of Expenses
-    - C7..I7 = Sunday..Saturday dates (Excel date serials)
+    - C7..I7 = the 7 dates of the week (Excel date serials)
     - Entries write into columns C..I by row (see rows table in script.js)
 
 Multiple reports for the same week
@@ -37,7 +39,7 @@ Deploy steps (Cloudflare Pages)
    - APP_USER      — optional login user (see note on auth below)
    - APP_PASS      — optional login pass
    - TOKEN_SECRET  — any long random string (for /api/login HMAC)
-7. Deploy. Open the site, set Sync Name, pick a Sunday, start typing.
+7. Deploy. Open the site, set Sync Name, pick any date in the week, start typing.
 
 Data shape in KV
 ----------------

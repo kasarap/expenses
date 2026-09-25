@@ -16,7 +16,7 @@
   <header class="bar">
     <div class="bar-left">
       <div class="title">Weekly Expenses <span id="appVersionBadge" class="version-badge"></span></div>
-      <div class="sub">Cloud sync &bull; Week Ending (Saturday)</div>
+      <div class="sub">Cloud sync &bull; Mon&ndash;Sun weeks (2026 form)</div>
     </div>
     <div class="bar-right">
       <div class="save-info">
@@ -47,10 +47,10 @@
             <option value="">(Select a report)</option>
           </select>
         </label>
-        <label>Sunday date
+        <label>Week start (pick any day)
           <input id="sundayDate" type="date">
         </label>
-        <label>Week Ending (Saturday)
+        <label>Week Ending
           <input id="weekEnding" type="date" disabled>
         </label>
       </div>
@@ -70,6 +70,7 @@
       <div class="row">
         <button id="btnNewReport" class="ghost" type="button">+ New report (same week)</button>
         <button id="btnDeleteWeek" class="danger" disabled type="button">Delete this report</button>
+        <button id="btnConvertWeek" class="ghost" type="button" style="display:none;">Convert to Mon&ndash;Sun (2026 form)</button>
         <button id="btnClear" class="ghost" type="button">Start over</button>
       </div>
 
@@ -96,13 +97,13 @@
           <thead>
             <tr>
               <th class="stickyLabel">Label</th>
-              <th id="thSUN"><div class="th-date" id="dateSUN"></div><div class="th-dow">SUN</div></th>
-              <th id="thMON"><div class="th-date" id="dateMON"></div><div class="th-dow">MON</div></th>
-              <th id="thTUE"><div class="th-date" id="dateTUE"></div><div class="th-dow">TUE</div></th>
-              <th id="thWED"><div class="th-date" id="dateWED"></div><div class="th-dow">WED</div></th>
-              <th id="thTHU"><div class="th-date" id="dateTHU"></div><div class="th-dow">THU</div></th>
-              <th id="thFRI"><div class="th-date" id="dateFRI"></div><div class="th-dow">FRI</div></th>
-              <th id="thSAT"><div class="th-date" id="dateSAT"></div><div class="th-dow">SAT</div></th>
+              <th id="th0"><div class="th-date" id="date0"></div><div class="th-dow" id="dow0">MON</div></th>
+              <th id="th1"><div class="th-date" id="date1"></div><div class="th-dow" id="dow1">TUE</div></th>
+              <th id="th2"><div class="th-date" id="date2"></div><div class="th-dow" id="dow2">WED</div></th>
+              <th id="th3"><div class="th-date" id="date3"></div><div class="th-dow" id="dow3">THU</div></th>
+              <th id="th4"><div class="th-date" id="date4"></div><div class="th-dow" id="dow4">FRI</div></th>
+              <th id="th5"><div class="th-date" id="date5"></div><div class="th-dow" id="dow5">SAT</div></th>
+              <th id="th6"><div class="th-date" id="date6"></div><div class="th-dow" id="dow6">SUN</div></th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -113,7 +114,7 @@
         <div class="totals-row">
           <div class="totals-label">Day totals</div>
           <div class="totals-days">
-            <input id="totSUN" readonly><input id="totMON" readonly><input id="totTUE" readonly><input id="totWED" readonly><input id="totTHU" readonly><input id="totFRI" readonly><input id="totSAT" readonly>
+            <input id="tot0" readonly><input id="tot1" readonly><input id="tot2" readonly><input id="tot3" readonly><input id="tot4" readonly><input id="tot5" readonly><input id="tot6" readonly>
           </div>
         </div>
         <div class="totals-row totals-row-week">
@@ -249,6 +250,6 @@
 
   <script src="vendor/jszip.min.js"></script>
   <script>if(typeof JSZip==='undefined'){document.write('<script src="jszip.min.js"><\/script>');}</script>
-  <script src="script.js?v=82-1"></script>
+  <script src="script.js?v=88-form-2026"></script>
 </body>
 </html>

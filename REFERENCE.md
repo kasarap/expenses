@@ -5,11 +5,51 @@ handoff document — Claude should be able to plan changes from this file
 alone, without the zip attached.
 
 Deployed target: `https://exp.jonmercado.com/` (Cloudflare Pages + KV).
-Current `APP_VERSION` constant: `87-chase-freedom-card`.
+Current `APP_VERSION` constant: `88-form-2026`.
 
 ---
 
 ## What changed in v2 (history)
+
+0. **2026 KH expense form, Mon→Sun weeks (`88-form-2026`).** Company
+   moved to the "KH Expense Form 2026" layout: days run **MON..SUN** and
+   the week ends on a **Sunday**. Other form changes: Entertainment
+   rows 46–49 GL code `4-44040` → `4-44100`; B10 is the text
+   `@ 0.70/mile` and row 29 formulas are `=0.7*C10` (hardcoded rate).
+   - **New template `Expenses Form 2026.xlsx`.** Built by patching the
+     known-good `Expenses Form.xlsx` XML (row-6 day headers rotated to
+     MON..SUN, B10/row-29 as above, new shared string `4-44100` for
+     B46:B49, page-2 "Week Ending, 2019" leftover removed). NOT a
+     LibreOffice conversion of the KH `.xls` — that conversion loses
+     E5's date format (shows a serial), the H5:J5 merge and the print
+     scale. Name "Jonathan Mercado" and Dept 8095 prefill kept.
+     `Expenses Form.xlsx` stays for legacy weeks.
+   - **Layout is derived from the key, no flag:** `isForm2026(weekEnding)`
+     = weekEnding is a Sunday. Sunday-keyed → 2026 template, MON..SUN
+     labels. Saturday-keyed (every report before the cutover) →
+     legacy template, SUN..SAT. Cols C..I always = week position 0..6
+     starting at `weekEnding − 6`, so totals, tracker, stats and card
+     math needed no changes.
+   - **Cutover:** `FORM2026_FIRST_MONDAY = '2026-09-21'`. The week
+     input (id still `sundayDate`, now "Week start (pick any day)")
+     snaps any picked date via `weekEndingForDate()`: ≥ cutover → Mon
+     start / Sun end; earlier → Sun start / Sat end.
+   - `dayIds` / `dayLongNames` are now `let`, reset by
+     `applyWeekLayout(weekEnding)` (called on load, week pick, start
+     over, delete, init). Desktop header/total IDs are positional:
+     `date0..6`, `dow0..6`, `tot0..6`, `th0..6` (were `dateSUN` etc.).
+   - **Convert button** (`#btnConvertWeek`, `convertReportTo2026()`):
+     shown only for a Saturday-keyed report with weekEnding ≥
+     2026-09-26 (the week straddling the cutover). Shifts D..I → C..H
+     (incl. `_items`), PUTs to weekEnding+1 (Sunday), deletes the old
+     key, and moves any Payment Tracker sent/paid entry. Refuses if the
+     old Sunday column (C) has data. Used once to move "Angelton" week
+     ending 9/26 → 9/27.
+   - **yonmcp follow-up:** the MCP's `add_expense`/`set_field` take
+     `day` SUN..SAT + a Saturday `weekEnding`. For Sunday-keyed weeks
+     the day→column map must be MON→C … SUN→I (i.e. column index =
+     days between `weekEnding − 6` and the target date). Until that's
+     updated, don't write to 2026 weeks through the MCP.
 
 0. **Added Chase Freedom card (`87-chase-freedom-card`).** New entry in
    the `CARDS` constant: `{key:'chase', label:'Chase Freedom',
@@ -171,7 +211,8 @@ expenses/
 ├── script.js                  ~1424 lines. All client logic (see map below).
 ├── README.txt                 Deploy + usage overview.
 ├── REFERENCE.md               This file.
-├── Expenses Form.xlsx         Template fetched at export time. Untouched
+├── Expenses Form 2026.xlsx    2026 KH template (Mon→Sun). Used for Sunday-keyed weeks.
+├── Expenses Form.xlsx         Legacy template (Sun→Sat). Untouched
 │                              by the app — only modified in-memory during
 │                              download.
 ├── jszip.min.js               Fallback JSZip (loaded if vendor/ fails).
@@ -194,8 +235,10 @@ expenses/
 
 - **Sync Name** — namespace per user. `localStorage['expenses_sync_name']`.
   Sanitized to ≤80 chars. Single-line, whitespace collapsed.
-- **Week Ending** — Saturday, ISO `YYYY-MM-DD`. Derived from
-  `Sunday + 6` via `computeWeekEndingFromSunday()`.
+- **Week Ending** — ISO `YYYY-MM-DD`. **Sunday** for 2026-form weeks
+  (Mon→Sun, from 2026-09-21 on), **Saturday** for legacy weeks. Week
+  start = weekEnding − 6 (`computeSundayFromWeekEnding()` — name is
+  historical; it returns the week-start date for either layout).
 - **reportId** — slug of BP, 1–40 chars `[a-z0-9-]`. Unique per
   `(sync, weekEnding)`. Collision → `-2`, `-3`. Empty BP → `untitled`.
 - **KV key**: `expenses:{sync}:{weekEnding}:{reportId}`.
@@ -284,8 +327,8 @@ tab's real edits — last writer wins, data lost.
 
 ## Row catalog (`script.js` `rows` array, top of file)
 
-Columns C–I map to SUN–SAT. `group` controls the mobile day-sheet
-section.
+Columns C–I map to week positions 0–6: MON–SUN on 2026-form weeks,
+SUN–SAT on legacy weeks. `group` controls the mobile day-sheet section.
 
 | Row | Label | Type | Group |
 |-----|-------|------|-------|
@@ -377,7 +420,7 @@ Approximate line numbers for navigation:
 
 DOM IDs (from `index.html`, accessed via `el(id)`):
 `businessPurpose`, `entryTable`, `sundayDate`, `weekEnding`,
-`weekSelect`, `dateSUN..dateSAT`, `totWEEK`, `lastSaved`,
+`weekSelect`, `date0..date6`, `dow0..dow6`, `tot0..tot6`, `btnConvertWeek`, `totWEEK`, `lastSaved`,
 `saveStatus`, `syncPill`, `dayStrip`, `mobileWeekTotal`,
 `daySheetOverlay`, `daySheetTitle`, `daySheetDate`, `daySheetTotal`,
 `daySheetBody`, `daySheetPrev`, `daySheetNext`, `daySheetClose`,

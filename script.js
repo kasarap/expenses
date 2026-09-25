@@ -9,9 +9,57 @@
 const API = { data: '/api/data', weeks: '/api/weeks' };
 const el = (id) => document.getElementById(id);
 
-const dayCols = ['C','D','E','F','G','H','I']; // Sun..Sat
-const dayIds  = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
-const dayLongNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+// Excel columns C..I always map to week positions 0..6, where position 0 is
+// the week START date (weekEnding − 6). Which weekday that is depends on the
+// report's layout (see WEEK LAYOUT below):
+//   - 2026 form (weekEnding is a SUNDAY):   C..I = MON..SUN
+//   - Legacy form (weekEnding is a Saturday): C..I = SUN..SAT
+const dayCols = ['C','D','E','F','G','H','I'];
+const DOW_SHORT = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+const DOW_LONG  = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+// Mutable: re-set by applyWeekLayout() whenever the loaded week changes.
+let dayIds       = ['MON','TUE','WED','THU','FRI','SAT','SUN'];
+let dayLongNames = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+
+// ==================== WEEK LAYOUT (2026 form cutover) ====================
+// Weeks that START on/after this Monday use the 2026 KH form (Mon→Sun,
+// week ending Sunday). Anything earlier stays on the legacy Sun→Sat form.
+const FORM2026_FIRST_MONDAY = '2026-09-21'; // → first 2026 week ends Sun 2026-09-27
+const TEMPLATE_2026   = 'Expenses Form 2026.xlsx';
+const TEMPLATE_LEGACY = 'Expenses Form.xlsx';
+
+// Layout is self-describing from the key: a Sunday weekEnding = 2026 form.
+function isForm2026(weekEndingISO){
+  if (!weekEndingISO) return true; // no week picked yet → default to the new form
+  return parseISODate(weekEndingISO).getDay() === 0;
+}
+// Given any date, return the ISO weekEnding of the report week containing it.
+function weekEndingForDate(iso){
+  const d = parseISODate(iso);
+  const out = new Date(d);
+  if (iso >= FORM2026_FIRST_MONDAY){
+    const back = (d.getDay() + 6) % 7;      // days since Monday
+    out.setDate(d.getDate() - back + 6);    // → Sunday
+  } else {
+    out.setDate(d.getDate() - d.getDay() + 6); // → Saturday
+  }
+  return toISODate(out);
+}
+function applyWeekLayout(weekEndingISO){
+  const startDow = isForm2026(weekEndingISO) ? 1 : 0;
+  dayIds       = Array.from({length:7}, (_,i) => DOW_SHORT[(startDow+i)%7]);
+  dayLongNames = Array.from({length:7}, (_,i) => DOW_LONG[(startDow+i)%7]);
+  for (let i=0; i<7; i++){
+    const h = document.getElementById(`dow${i}`);
+    if (h) h.textContent = dayIds[i];
+  }
+  const we = document.getElementById('weekEnding');
+  const lbl = we && we.closest('label');
+  if (lbl && lbl.firstChild && lbl.firstChild.nodeType === 3){
+    lbl.firstChild.textContent = `Week Ending (${isForm2026(weekEndingISO) ? 'Sunday' : 'Saturday'}) `;
+  }
+  updateConvertButton();
+}
 
 const MILEAGE_RATE = 0.7; // $/mile
 
@@ -103,7 +151,7 @@ const rows = [
   {row:39, label:'Dues & Subscriptions',        type:'currency', group:'Other'},
 ];
 
-const APP_VERSION = '87-chase-freedom-card';
+const APP_VERSION = '88-form-2026';
 
 // ==================== STATE ====================
 let currentSync = (localStorage.getItem('expenses_sync_name') || '').trim();
@@ -339,10 +387,7 @@ function fmtYYMMDD(d){
 }
 
 function setHeaderDatesFromSunday(sundayISO){
-  const dateEls = {
-    SUN:el('dateSUN'), MON:el('dateMON'), TUE:el('dateTUE'),
-    WED:el('dateWED'), THU:el('dateTHU'), FRI:el('dateFRI'), SAT:el('dateSAT')
-  };
+  const dateEls = [0,1,2,3,4,5,6].map(i => el(`date${i}`));
   if (!sundayISO){
     Object.values(dateEls).forEach(x => { if (x) x.textContent = ''; });
     renderMobileDayStrip();
@@ -352,8 +397,7 @@ function setHeaderDatesFromSunday(sundayISO){
   for (let i=0; i<7; i++){
     const d = new Date(sun);
     d.setDate(sun.getDate()+i);
-    const id = dayIds[i];
-    if (dateEls[id]) dateEls[id].textContent = `${d.getMonth()+1}/${d.getDate()}`;
+    if (dateEls[i]) dateEls[i].textContent = `${d.getMonth()+1}/${d.getDate()}`;
   }
   renderMobileDayStrip();
 }
@@ -390,7 +434,6 @@ function buildTable(){
     for (let i=0; i<7; i++){
       const td = document.createElement('td');
       const col = dayCols[i];
-      const dayId = dayIds[i];
 
       const cellWrapper = document.createElement('div');
       cellWrapper.className = 'cell-wrapper';
@@ -435,7 +478,7 @@ function buildTable(){
           addBtn.dataset.addr = addr;
           addBtn.addEventListener('click', (e)=>{
             e.preventDefault();
-            openLineItemModal(addr, r.label, dayId);
+            openLineItemModal(addr, r.label, dayIds[i]);
           });
           cellWrapper.appendChild(addBtn);
         }
@@ -576,7 +619,7 @@ function renderDaySheetBody(dayIdx){
     const month = d.toLocaleString(undefined, { month:'short' });
     el('daySheetDate').textContent = `${month} ${d.getDate()}`;
   } else {
-    el('daySheetDate').textContent = 'Set Sunday date first';
+    el('daySheetDate').textContent = 'Pick the week first';
   }
 
   const col = dayCols[dayIdx];
@@ -744,8 +787,9 @@ function startOver(){
   if (!confirm('Start a new report from scratch? The current report stays saved.')) return;
   el('sundayDate').value = '';
   el('weekEnding').value = '';
-  setHeaderDatesFromSunday('');
   currentWeekEnding = '';
+  applyWeekLayout('');
+  setHeaderDatesFromSunday('');
   currentReportId = '';
   clientKnownUpdatedAt = null;
   conflictPaused = false;
@@ -753,13 +797,13 @@ function startOver(){
   el('weekSelect').value = '';
   clearEntryValues();
   setButtonsEnabled();
-  setStatus('New report ready. Pick a Sunday date to begin.');
+  setStatus('New report ready. Pick a date in the week to begin.');
 }
 
 function newReportSameWeek(){
   // Only meaningful if we have a week selected.
   if (!currentWeekEnding){
-    setStatus('Pick a Sunday date first, then create the new report.');
+    setStatus('Pick the week first, then create the new report.');
     return;
   }
   // Keep the sync and the dates; drop the report identity and entries.
@@ -825,7 +869,7 @@ function computeTotals(){
   let week = 0;
   totals.forEach((t, idx) => {
     week += t;
-    el(`tot${dayIds[idx]}`).value = t ? `$${t.toFixed(2)}` : '';
+    el(`tot${idx}`).value = t ? `$${t.toFixed(2)}` : '';
   });
   el('totWEEK').value = week ? `$${week.toFixed(2)}` : '';
 
@@ -1039,6 +1083,7 @@ async function loadReport(meta){
     clientKnownUpdatedAt = out.updatedAt || null;
     conflictPaused = false;
     el('weekEnding').value = meta.weekEnding;
+    applyWeekLayout(meta.weekEnding);
     el('sundayDate').value = toISODate(computeSundayFromWeekEnding(meta.weekEnding));
     setHeaderDatesFromSunday(el('sundayDate').value);
     applyData(out.data);
@@ -1243,6 +1288,8 @@ async function deleteCurrentReport(){
       const cb = el('conflictBanner'); if (cb) cb.remove();
       el('sundayDate').value = '';
       el('weekEnding').value = '';
+      applyWeekLayout('');
+      setHeaderDatesFromSunday('');
     }
     renderWeeksDropdown();
     setStatus('Deleted.');
@@ -1251,6 +1298,78 @@ async function deleteCurrentReport(){
     setStatus('Delete failed.');
   } finally {
     setButtonsEnabled();
+  }
+}
+
+// ==================== CONVERT TO 2026 FORM ====================
+// One-time migration for a Sun→Sat report whose week straddles the cutover
+// (e.g. week ending Sat 2026-09-26). Shifts Mon..Sat (cols D..I) one column
+// left into the Mon→Sun layout (C..H), re-keys it to the following Sunday,
+// and removes the old Saturday-keyed report. The legacy week's Sunday
+// (col C) belongs to the previous week in the new layout, so conversion is
+// refused if that day has anything in it.
+function canConvertTo2026(){
+  return !!currentWeekEnding && !!currentReportId
+    && !isForm2026(currentWeekEnding)
+    && currentWeekEnding >= '2026-09-26'          // only the week straddling the cutover
+    && parseISODate(currentWeekEnding).getDay() === 6;
+}
+function updateConvertButton(){
+  const b = document.getElementById('btnConvertWeek');
+  if (b) b.style.display = canConvertTo2026() ? '' : 'none';
+}
+async function convertReportTo2026(){
+  if (!canConvertTo2026()) return;
+  clearTimeout(autosaveTimer);
+  const data = serialize();
+  const entries = data.entries || {};
+  const sunKeys = Object.keys(entries).filter(k => /^C\d+(_items)?$/.test(k)
+    && !(Array.isArray(entries[k]) && entries[k].length === 0));
+  if (sunKeys.length){
+    alert('The Sunday column has entries. In the 2026 layout that day belongs to the previous week, so move or clear it first, then convert.');
+    return;
+  }
+  const oldWE = currentWeekEnding, oldId = currentReportId;
+  const newWEd = parseISODate(oldWE); newWEd.setDate(newWEd.getDate()+1);
+  const newWE = toISODate(newWEd);
+  if (!confirm(`Convert this report to the 2026 Mon–Sun form?\n\nWeek ending ${oldWE} (Sat) → ${newWE} (Sun). Days move to the new columns; the old report is removed.`)) return;
+
+  const shifted = {};
+  const COLMAP = { D:'C', E:'D', F:'E', G:'F', H:'G', I:'H' };
+  Object.keys(entries).forEach(k => {
+    const m = /^([C-I])(\d+)(_items)?$/.exec(k);
+    if (!m){ shifted[k] = entries[k]; return; }
+    const nc = COLMAP[m[1]];
+    if (!nc) return; // empty Sunday leftovers
+    shifted[`${nc}${m[2]}${m[3]||''}`] = entries[k];
+  });
+
+  setStatus('Converting…');
+  try{
+    const qs = new URLSearchParams({ sync: currentSync, weekEnding: newWE, reportId: oldId });
+    const out = await apiFetchJson(`${API.data}?${qs.toString()}`, { method:'PUT', body: JSON.stringify({
+      syncName: currentSync, weekEnding: newWE, reportId: oldId,
+      businessPurpose: data.businessPurpose, entries: shifted, clientKnownUpdatedAt: ''
+    })});
+    const delQs = new URLSearchParams({ sync: currentSync, weekEnding: oldWE, reportId: oldId });
+    await apiFetchJson(`${API.data}?${delQs.toString()}`, { method:'DELETE' });
+
+    // Carry over any Payment Tracker sent/paid dates.
+    const td = loadTrackerData();
+    const oldK = `${oldWE}:${oldId}`, newK = `${newWE}:${oldId}`;
+    if (td[oldK]){ td[newK] = td[oldK]; delete td[oldK]; saveTrackerData(td); }
+    delete reportTotalsCache[oldK]; delete reportCardTotalsCache[oldK];
+    statsCache = null;
+
+    await loadWeeksForSync(false);
+    await loadReport({ weekEnding: newWE, reportId: oldId });
+    if (out && out.updatedAt) clientKnownUpdatedAt = out.updatedAt;
+    setStatus('Converted to 2026 form ✓');
+  } catch(e){
+    console.error(e);
+    setStatus(e && e.status === 409
+      ? 'Convert failed — a report already exists for that Sunday week.'
+      : 'Convert failed: ' + (e.message || e));
   }
 }
 
@@ -1266,13 +1385,15 @@ function copyFileName(){
   }).catch(()=> setStatus('Copy failed — check clipboard permissions.'));
 }
 async function downloadExcel(){
-  if (!currentWeekEnding){ setStatus('Enter a Sunday date first.'); return; }
+  if (!currentWeekEnding){ setStatus('Pick the week first.'); return; }
   if (!ensureSync()){ setStatus('Sync Name not set.'); return; }
 
   setStatus('Building Excel…');
   try{
     if (typeof JSZip === 'undefined') throw new Error('JSZip library not loaded');
-    const candidates = ['/Expenses%20Form.xlsx','Expenses%20Form.xlsx','/Expenses Form.xlsx','Expenses Form.xlsx'];
+    const tpl = isForm2026(currentWeekEnding) ? TEMPLATE_2026 : TEMPLATE_LEGACY;
+    const tplEnc = tpl.replace(/ /g, '%20');
+    const candidates = [`/${tplEnc}`, tplEnc, `/${tpl}`, tpl];
     let res = null;
     for (const url of candidates){
       try{ res = await fetch(url, { cache:'no-store' }); if (res && res.ok) break; } catch {}
@@ -1373,14 +1494,14 @@ async function downloadExcel(){
     }
 
     const bp  = (el('businessPurpose')?.value || '').trim();
-    const sat = parseISODate(currentWeekEnding);
-    const sun = computeSundayFromWeekEnding(currentWeekEnding);
+    const sat = parseISODate(currentWeekEnding);            // week-ending date (Sat legacy / Sun 2026)
+    const sun = computeSundayFromWeekEnding(currentWeekEnding); // week-start date (Sun legacy / Mon 2026)
 
     // Header cells
     if (bp) setCellText('H5', bp); else clearCellValue('H5');
     setCellDate('E5', sat);
 
-    // Date row 7 — Sunday..Saturday
+    // Date row 7 — week start..week end (template's row-6 headers match the layout)
     for (let i=0; i<7; i++){
       const d = new Date(sun);
       d.setDate(d.getDate()+i);
@@ -1483,10 +1604,13 @@ function setButtonsEnabled(){
   el('btnSave').disabled = !hasWeek || !currentSync;
 }
 function onSundayChange(){
-  const v = el('sundayDate').value;
-  if (!v) return;
-  const sat = computeWeekEndingFromSunday(v);
-  const newWeekEnding = toISODate(sat);
+  const picked = el('sundayDate').value;
+  if (!picked) return;
+  // Snap any picked date to its report week (Mon–Sun from 2026-09-21 on,
+  // Sun–Sat before that) and show the week-start date in the input.
+  const newWeekEnding = weekEndingForDate(picked);
+  const v = toISODate(computeSundayFromWeekEnding(newWeekEnding));
+  el('sundayDate').value = v;
   if (currentWeekEnding && newWeekEnding !== currentWeekEnding){
     clearEntryValues();
     currentReportId = '';
@@ -1498,6 +1622,7 @@ function onSundayChange(){
   }
   currentWeekEnding = newWeekEnding;
   el('weekEnding').value = currentWeekEnding;
+  applyWeekLayout(currentWeekEnding);
   setHeaderDatesFromSunday(v);
   setButtonsEnabled();
 }
@@ -1526,7 +1651,9 @@ async function init(){
   renderSync();
   renderMobileDayStrip();
 
+  applyWeekLayout('');
   el('sundayDate').addEventListener('change', onSundayChange);
+  el('btnConvertWeek').addEventListener('click', convertReportTo2026);
   el('weekSelect').addEventListener('change', onWeekSelectChange);
   el('businessPurpose').addEventListener('input', onBusinessPurposeChange);
 
